@@ -19,9 +19,6 @@ If mise is not activated in the current shell, run commands through
 mise exec -- cargo check --workspace
 ```
 
-When available, mise uses `cargo-binstall` to install Cargo utilities such as
-`cargo-nextest` and `cargo-shear`.
-
 ## Validation
 
 Use the tasks defined in `mise.toml` to validate changes:
@@ -163,31 +160,29 @@ When modifying any struct that is serialized to disk or over the wire:
 
 - Always use `#[expect(...)]` instead of `#[allow(...)]` for suppressing lints. The `expect` attribute will warn if the lint is no longer triggered, helping to keep the codebase clean.
 
-## Testing
+### Testing
 
-### Test organization
+#### Test organization
 
 - Unit tests in the same file as the code they test.
 - Integration tests in `tests/`
 
-### Testing tools
+#### Testing tools
 
 - **test-case**: For parameterized tests.
-- **proptest**: For property-based testing.
 - **insta**: For snapshot testing.
-- **libtest-mimic**: For custom test harnesses.
 - **pretty_assertions**: For better assertion output.
 
-## Commits
+### Commits
 
-### Message style
+#### Message style
 
 - Always use conventional commits.
 - Keep descriptions concise but descriptive.
 - Use simple past and present tense: "Previously, when the user did X, Y used to happen. With this commit, now Z happens. Also add tests for U, V, and W."
 - Commit messages should be Markdown. Don't use backticks in commit message titles, but do use them in bodies.
 
-### Commit quality
+#### Commit quality
 
 - **Atomic commits**: Each commit should be a logical unit of change.
 - **Bisect-able history**: Every commit must build and pass all checks.
@@ -198,70 +193,31 @@ When modifying any struct that is serialized to disk or over the wire:
 - Pin actions to full commit SHAs and include the corresponding full semantic
   version in a comment, e.g. prefer `foo/bar@{sha} # v1.2.3` vs `foo/bar@v1`.
 
-### Ubiquitious language
-
 ## Documentation
 
 - Docs live in `/docs`.
-- Decision records live in `/docs/decisions`
-- Use the template in `/docs/decisions/YYYY-MM-DD-template.md` for new decisions
-
-## Planning
-
-- Use the project's issue tracker in GitHub for managing work as issues
-- Organize work into broad and narrow issues as needed. Use sub-issues as
-  appropriate for work that goes into a broader project or goal issue
-- Use issue relationships to communicate if work is blocked by another issue
-- Write the minimal description possible in an issue to convey the point
-- Communicate the background (if any) and what work the issue is tracking
-- Default to one small, directly implemented task when only one task is ready.
-  Use agents and parallel lanes when specialist context or genuine concurrency
-  is likely to save more time than the handoffs cost.
-- Make the first coding slice a walking path through one behavior. Split parser
-  coverage, additional fact types, diagnostics, compatibility hardening, and
-  exhaustive fixtures into follow-up tasks when they can be reviewed
-  independently.
-- Commit a working slice after focused validation before starting broad review
-  or integration checks.
-- Keep reviews bounded to the acceptance criteria and concrete risks in the
-  change. Record useful adjacent investigation as follow-up work instead of
-  extending the review.
+- Architecture decision records (ADRs) live in `/docs/adrs`
+- Use the template in `/docs/adrs/YYYY-MM-DD-template.md` for new decisions
+- Use ADRs to capture the following types of decisions:
+  - General coding guidelines or practices that affect the entire project
+  - Specific architecture guidelines or practices that will influence or be used
+    for upcoming work
+- Domain knowledge lives in `CONTEXT.md` files. These files:
+  - Document domain or language concepts for a particular part of the project
+  - Borrow from domain-driven design, in particular ubiquitous language and
+    bounded contexts, to have a shared vocabulary between agents and humans
+  - Contain flow or mermaid charts to help with communicating domain objects,
+    relationships, or broader concepts
+- Whenever a change is made that may impact documentation above, make sure to
+  either update it directly or leave a note about what has changed or superceded
+  it (e.g. note if an ADR supercedes another one or if an ADR is superceded by
+  another one)
 
 ## Worktrees
 
 - Store worktrees under the sibling `query.worktrees/` directory.
 - Use one descriptive subdirectory per project or task, and perform project work
   from that worktree.
-
-## Temporary project artifacts
-
-- Use the `tmp` skill whenever a task needs temporary plans, research, handoffs,
-  validation logs, generated pull request bodies, or other untracked artifacts.
-- Store these artifacts under
-  `<primary-repository-root>/.agents/tmp/projects/<project-key>/`, following the
-  tmp skill's `.agents/tmp` convention.
-- Use an absolute artifact path when delegating work from another worktree.
-- Keep source inspection, source edits, Git operations, and validation in the
-  assigned worktree. Use `.agents/tmp/` only for temporary supporting
-  artifacts.
-- Give each concurrent agent an exclusive subdirectory under
-  `.agents/tmp/projects/<project-key>/agents/`. Agents must not edit another
-  lane's artifacts.
-- Keep GitHub issues, Project fields, checkpoints, pull requests, and tracked
-  repository files as the durable source of truth. Promote any state needed to
-  resume on another machine before the temporary artifact is removed.
-- Never persist credentials, tokens, environment secrets, or unnecessary
-  sensitive output in `.agents/tmp/`.
-- Clean up each lane's temporary artifacts as soon as its handoff has been
-  consumed, required evidence has been reviewed, and essential state has been
-  promoted. Clean up generated pull request bodies after confirming GitHub has
-  the current body.
-- Before ending a task, inspect the exact project artifact directory and remove
-  files and empty directories that are no longer needed. Retain only artifacts
-  that an active lane, pending integration, or recovery action still requires,
-  and record why they remain.
-- Remove only specific, resolved paths. Never delete the `.agents/tmp/` root,
-  use globs for cleanup, or use age-based pruning.
 
 ## Self improvement
 
