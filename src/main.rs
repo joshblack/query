@@ -1,11 +1,23 @@
+use std::process::ExitCode;
+
 use clap::Parser;
+use thiserror::Error;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Query source code relationships")]
 struct Cli;
 
-fn main() {
+#[derive(Debug, Error)]
+enum CliError {}
+
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the CLI error boundary is established before commands add fallible behavior"
+)]
+fn main() -> Result<ExitCode, CliError> {
     let _cli = Cli::parse();
+
+    Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(test)]
