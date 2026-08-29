@@ -38,8 +38,8 @@ Delegate bounded work with the complete context each agent needs:
   the issue, project decisions, and repository conventions.
 
 Run the product manager and architect in parallel only when their investigations
-are independent. Do not run multiple agents that can edit the same working tree
-at the same time.
+are independent. Do not run multiple agents that can edit the same project
+worktree at the same time.
 
 The orchestrator owns GitHub state. Sub-agents return structured handoffs, and
 the orchestrator creates or updates issues, checkpoints, and links. This avoids
@@ -60,7 +60,10 @@ After approval:
 4. Apply one type label to each issue.
 5. Put later or uncertain work in the parent issue's candidate work section.
 6. Record acceptance criteria and native issue dependency relationships.
-7. Set the Project status, write the first checkpoint, and identify the next
+7. Plan the task branches as one dependency-ordered GitHub stack.
+8. Create one dedicated project worktree so the primary checkout remains free
+   for user work.
+9. Set the Project status, write the first checkpoint, and identify the next
    unblocked task.
 
 Use the issue markers, type labels, and Project fields from the shared workflow.
@@ -75,12 +78,17 @@ Work on one independently valuable task at a time:
    relationships.
 3. Set the task to `In Progress` and mark it as the active task in the parent
    issue.
-4. Delegate implementation with the task issue, relevant decisions, and
-   validation requirements.
-5. Set the task to `In Review` and delegate review after implementation.
-6. Resolve review findings or record why they remain.
-7. Set the final Project status and update the project checkpoint before
-   selecting more work.
+4. Create or switch to the task branch in the project worktree.
+5. Delegate implementation with the worktree path, branch, task issue, relevant
+   decisions, and validation requirements.
+6. Commit the layer, submit the stack, fill the pull request body, and mark the
+   pull request ready.
+7. Set the task to `In Review` and delegate review against the pull request so
+   the user and reviewer can review the same change concurrently.
+8. Resolve review findings or record why they remain.
+9. Keep approved task pull requests open while implementing later layers.
+10. Merge the complete approved stack as a unit, then set task and parent
+    statuses to `Done` and write the final checkpoint.
 
 Do not build the whole project from the original idea. Revisit the plan after
 each slice using what we learned.
