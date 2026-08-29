@@ -34,8 +34,10 @@ Read:
 - Native `blocked by` and `blocking` issue relationships.
 - GitHub Project membership and `Status` values.
 - Linked pull requests and merge state.
+- The GitHub stack order, approval state, and rebase status.
 - Referenced decision records.
-- The current branch, working tree, and relevant commits.
+- The recorded project worktree, current branch, working tree, and relevant
+  commits.
 
 Then summarize:
 
@@ -57,11 +59,17 @@ For implementation:
 1. Select one unblocked `Backlog` task.
 2. Set it to `In Progress`, update the parent issue's active task, and write a
    checkpoint.
-3. Delegate to the implementer with the full task and project context.
-4. Set it to `In Review` and delegate review.
-5. Resolve findings.
-6. Set the final Project status and update GitHub state before ending the
-   session.
+3. Restore or create the dedicated project worktree, then create or switch to
+   the task's branch in the recorded GitHub stack.
+4. Delegate to the implementer with the worktree path and full task and project
+   context.
+5. Commit the layer, submit the stack, fill the pull request body, and mark the
+   pull request ready.
+6. Set it to `In Review` and delegate review against the pull request.
+7. Resolve findings and keep approved pull requests open until all stack layers
+   are ready.
+8. Merge the complete stack as a unit, then set the final Project status and
+   update GitHub state before ending the session.
 
 Do not silently change scope. If the next step requires a product or
 architectural decision, delegate the investigation and present a recommendation
