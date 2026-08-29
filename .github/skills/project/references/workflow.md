@@ -254,8 +254,9 @@ changes are committed, validated, submitted, and described:
    create or update draft pull requests.
 2. Fill out [the pull request template](../../../pull_request_template.md) for
    the active task. Include the parent project issue, close the task issue with
-   a supported closing keyword, and describe the stack position, behavior
-   changed, validation, and focused review notes.
+   a supported closing keyword, and describe the behavior changed, validation,
+   and focused review notes. Do not duplicate stack metadata that `gh stack`
+   already communicates.
 3. Update the pull request with `gh pr edit --body-file <path>`. The stack
    extension generates titles and initial bodies, so the explicit edit is
    required.

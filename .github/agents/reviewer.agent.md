@@ -56,8 +56,7 @@ keeps dependencies in lower branches.
 
 ## Pull request body
 
-Confirm the body matches the implemented change, validation, stack position, and
-review focus.
+Confirm the body matches the implemented change, validation, and review focus.
 
 ## Residual risks
 

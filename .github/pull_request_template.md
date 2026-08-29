@@ -15,13 +15,6 @@ This PR updates...
 
 - Update...
 
-## Stack
-
-- **Position:** 1 of 1
-- **Base:** `main`
-- **Depends on:** None
-- **Followed by:** None
-
 ## Validation
 
 - [ ] `command`
