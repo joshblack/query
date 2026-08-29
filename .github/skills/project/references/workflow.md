@@ -18,7 +18,7 @@ makes the project understandable from GitHub alone.
 
 ## Parent project issue
 
-Apply the `type:project` label and include this marker:
+Apply the `type: project` label and include this marker:
 
 ```markdown
 <!-- copilot-project -->
@@ -82,9 +82,9 @@ all content outside its markers.
 
 Apply exactly one of these type labels:
 
-- `type:feature` for a user-visible capability or meaningful enhancement.
-- `type:bug` for behavior that does not work as intended.
-- `type:task` for enabling, maintenance, investigation, or implementation work
+- `type: feature` for a user-visible capability or meaningful enhancement.
+- `type: bug` for behavior that does not work as intended.
+- `type: task` for enabling, maintenance, investigation, or implementation work
   that is not independently a feature or bug.
 
 Use this marker, replacing the parent number:
@@ -175,7 +175,7 @@ checkpoint.
 
 When no issue number is supplied:
 
-1. Query the configured GitHub Project for open items with the `type:project`
+1. Query the configured GitHub Project for open items with the `type: project`
    label.
 2. Prefer an issue explicitly named by the user.
 3. Otherwise prefer the most recently updated project whose `Status` is neither
@@ -217,10 +217,10 @@ report the mismatch and update the Project and checkpoint after resolving it.
 
 Create these type labels if they do not exist:
 
-- `type:project`
-- `type:feature`
-- `type:bug`
-- `type:task`
+- `type: project`
+- `type: feature`
+- `type: bug`
+- `type: task`
 
 Configure one GitHub Project and record its owner, number, and URL in
 [config.md](./config.md). If project access is unavailable, stop and report the

@@ -16,7 +16,7 @@ Follow the shared [project workflow](../project/references/workflow.md).
 If the user supplies an issue, use it. Otherwise:
 
 1. Query the [configured GitHub Project](../project/references/config.md) for
-   open items with the `type:project` label.
+   open items with the `type: project` label.
 2. Inspect their `Status`, managed current state, and latest checkpoint.
 3. Prefer the most recently updated project whose `Status` is neither `Blocked`
    nor `Done` and that matches the user's description.
