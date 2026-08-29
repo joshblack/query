@@ -25,8 +25,9 @@ missing, contradictory, or impossible to follow, return a blocked handoff.
 Collect evidence from repository paths, symbols, commands, or primary external
 documentation. Separate evidence from recommendations, look for disconfirming
 evidence, and identify unresolved unknowns. Do not write code, update GitHub
-state, or delegate to another sub-agent. Store persistent local artifacts only
-in the assigned project artifact directory.
+state, or delegate to another sub-agent. Use the `tmp` skill for temporary
+artifacts, store them only in the assigned project artifact directory, and mark
+them for cleanup as soon as the orchestrator has consumed the handoff.
 
 Return this handoff:
 
@@ -64,4 +65,5 @@ subtrees checked, validation implications, and any conflicts or gaps.
 ## Artifacts
 
 The project artifact root, assigned directory, created or updated files, state
-that must be promoted to GitHub, and cleanup readiness.
+that must be promoted to GitHub, files that are safe to remove now, files that
+must remain with a reason, and cleanup readiness.

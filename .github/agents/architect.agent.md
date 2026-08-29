@@ -39,8 +39,9 @@ are missing, contradictory, or impossible to follow, return a blocked handoff.
 For synthesis, consume the shared frame and every completed lane handoff.
 Reconcile conflicting evidence against the shared rubric, identify assumptions
 and disconfirming evidence, and return one dependency-aware recommendation.
-Store persistent local artifacts only in the assigned project artifact
-directory.
+Use the `tmp` skill for temporary artifacts, store them only in the assigned
+project artifact directory, and mark them for cleanup as soon as the
+orchestrator has consumed the handoff.
 
 Return this handoff:
 
@@ -83,4 +84,5 @@ each implementation slice, and any conflicts or gaps.
 ## Artifacts
 
 The project artifact root, assigned directory, created or updated files, state
-that must be promoted to GitHub, and cleanup readiness.
+that must be promoted to GitHub, files that are safe to remove now, files that
+must remain with a reason, and cleanup readiness.

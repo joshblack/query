@@ -66,11 +66,12 @@ but skills do not expand tool access, scope, write leases, or GitHub ownership.
 Reject handoffs that omit instruction paths, derived obligations, environment
 setup, or instruction-derived validation.
 
-Before fan-out, create a stable artifact root under the primary checkout at
-`.tmp/projects/<project-key>/` and assign each agent an exclusive subdirectory.
-Persistent plans, research, handoffs, logs, and generated pull request bodies
-belong there, not in OS or session temporary directories. GitHub remains the
-durable source of truth.
+Before fan-out, invoke the `tmp` skill, create an artifact root under the primary
+checkout at `.agents/tmp/projects/<project-key>/`, and assign each agent an
+exclusive subdirectory. Temporary plans, research, handoffs, logs, and generated
+pull request bodies belong there, not in OS or session temporary directories.
+GitHub remains the durable source of truth. Clean up each artifact after it is
+consumed and its essential state is promoted.
 
 ## Plan before persisting
 
@@ -127,6 +128,9 @@ Work in bounded batches while preserving one canonical stack:
 11. Merge the complete approved stack as a unit, then set task and parent
     statuses to `Done`, promote essential state to GitHub, and write the final
     checkpoint.
+12. Inspect the exact project artifact directory and remove temporary files and
+    empty lane directories that no active lane, pending integration, review, or
+    recovery action still needs.
 
 Do not build the whole project from the original idea. Revisit the plan after
 each slice using what we learned.
@@ -143,6 +147,10 @@ Before stopping, persist enough information for a new session to continue:
 - Decisions made or still needed.
 - Blockers and dependencies.
 - The exact next planning, lane, integration, or review action.
+- Temporary artifacts retained for active work and the reason each one remains.
+
+Clean up consumed temporary artifacts before ending the session. Do not retain
+them only because they might be useful later.
 
 If an existing project issue is supplied, or the user asks to continue prior
 work, use the [resume-project skill](../resume-project/SKILL.md).

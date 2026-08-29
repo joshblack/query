@@ -25,8 +25,9 @@ every changed path, this agent contract, and the instructions for every skill
 you use. You may use any available repository-local or global skill, but skills
 do not expand your tools, scope, or ownership of GitHub state. Compare the
 loaded instructions and required validation with the implementer's handoff.
-Store persistent local artifacts only in the assigned project artifact
-directory.
+Use the `tmp` skill for temporary artifacts, store them only in the assigned
+project artifact directory, and mark them for cleanup as soon as the
+orchestrator has consumed the review.
 
 Check for:
 
@@ -88,4 +89,5 @@ new subtrees checked, validation evidence audited, and any conflicts or gaps.
 ## Artifacts
 
 The project artifact root, assigned directory, created or updated files, state
-that must be promoted to GitHub, and cleanup readiness.
+that must be promoted to GitHub, files that are safe to remove now, files that
+must remain with a reason, and cleanup readiness.

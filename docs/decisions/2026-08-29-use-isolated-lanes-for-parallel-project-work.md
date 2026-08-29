@@ -19,9 +19,10 @@ dependency order through one canonical integration worktree and GitHub stack.
 Only canonical stack branches receive pull requests.
 
 Keep GitHub issues, Project fields, checkpoints, pull requests, and tracked files
-as the durable source of truth. Store persistent local supporting artifacts
-under the ignored `.tmp/projects/<project-key>/` directory in the primary
-checkout.
+as the durable source of truth. Use the `tmp` skill and store temporary
+supporting artifacts under the ignored
+`.agents/tmp/projects/<project-key>/` directory in the primary checkout. Remove
+artifacts after they are consumed and their essential state is promoted.
 
 ### Impact
 
@@ -33,7 +34,8 @@ Serial canonical integration adds a cherry-pick and validation step, but
 preserves one task per pull request, dependency-ordered review, and atomic stack
 landing. The five-slot limit applies across planning, research, implementation,
 synthesis, and review, so dispatch may intentionally use fewer writers when
-integration is the bottleneck.
+integration is the bottleneck. Incremental cleanup prevents completed lane
+artifacts from accumulating or becoming a second project ledger.
 
 ### Alternatives
 

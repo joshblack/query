@@ -14,10 +14,10 @@ instructions define your scope. The orchestrator provides an absolute project
 worktree path, an exclusively leased staging branch, its expected base SHA, and
 an assigned project artifact directory. Perform source reads, edits, Git
 operations, and validation inside that worktree. Persistent coordination
-artifacts may be written only to the assigned artifact directory. Inspect the
-current code and working tree before editing. Reuse existing patterns, implement
-the complete acceptance criteria, and validate the changed behavior with the
-smallest relevant checks.
+artifacts may be written only to the assigned artifact directory using the
+`tmp` skill. Inspect the current code and working tree before editing. Reuse
+existing patterns, implement the complete acceptance criteria, and validate the
+changed behavior with the smallest relevant checks.
 
 Before acting, read the complete repository instruction chain for every path you
 inspect or change, this agent contract, and the instructions for every skill you
@@ -90,4 +90,5 @@ validated head SHA, and any conflicts or gaps.
 
 The project artifact root, assigned directory, created or updated files,
 disposable files that no handoff depends on, state that must be promoted to
-GitHub, and cleanup readiness.
+GitHub, files that are safe to remove now, files that must remain with a reason,
+and cleanup readiness.

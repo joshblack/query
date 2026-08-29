@@ -218,25 +218,35 @@ When modifying any struct that is serialized to disk or over the wire:
 - Use one descriptive subdirectory per project or task, and perform project work
   from that worktree.
 
-## Local project artifacts
+## Temporary project artifacts
 
-- Store uncommitted artifacts that must persist across sessions or agent
-  handoffs under `<primary-repository-root>/.tmp/projects/<project-key>/`.
+- Use the `tmp` skill whenever a task needs temporary plans, research, handoffs,
+  validation logs, generated pull request bodies, or other untracked artifacts.
+- Store these artifacts under
+  `<primary-repository-root>/.agents/tmp/projects/<project-key>/`, following the
+  tmp skill's `.agents/tmp` convention.
 - Use an absolute artifact path when delegating work from another worktree.
 - Keep source inspection, source edits, Git operations, and validation in the
-  assigned worktree. Use `.tmp/` only for supporting artifacts such as plans,
-  research, handoffs, validation logs, and generated pull request bodies.
-- Give each concurrent agent an exclusive subdirectory under
-  `.tmp/projects/<project-key>/agents/`. Agents must not edit another lane's
+  assigned worktree. Use `.agents/tmp/` only for temporary supporting
   artifacts.
+- Give each concurrent agent an exclusive subdirectory under
+  `.agents/tmp/projects/<project-key>/agents/`. Agents must not edit another
+  lane's artifacts.
 - Keep GitHub issues, Project fields, checkpoints, pull requests, and tracked
   repository files as the durable source of truth. Promote any state needed to
-  resume on another machine to GitHub before ending a session.
+  resume on another machine before the temporary artifact is removed.
 - Never persist credentials, tokens, environment secrets, or unnecessary
-  sensitive output in `.tmp/`.
-- Remove only a specific, resolved project artifact directory after its work
-  has been integrated or abandoned and its essential state has been promoted.
-  Never prune `.tmp/` with globs or age-based cleanup.
+  sensitive output in `.agents/tmp/`.
+- Clean up each lane's temporary artifacts as soon as its handoff has been
+  consumed, required evidence has been reviewed, and essential state has been
+  promoted. Clean up generated pull request bodies after confirming GitHub has
+  the current body.
+- Before ending a task, inspect the exact project artifact directory and remove
+  files and empty directories that are no longer needed. Retain only artifacts
+  that an active lane, pending integration, or recovery action still requires,
+  and record why they remain.
+- Remove only specific, resolved paths. Never delete the `.agents/tmp/` root,
+  use globs for cleanup, or use age-based pruning.
 
 ## Self improvement
 

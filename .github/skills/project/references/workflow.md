@@ -11,7 +11,7 @@ Each project lands as one canonical GitHub stack. Parallel implementation occurs
 on isolated staging branches in dedicated worktrees, then the orchestrator
 serializes completed commits through one canonical integration worktree. The
 primary repository checkout remains available for user work and stores ignored
-project artifacts under `.tmp/projects/`.
+temporary project artifacts under `.agents/tmp/projects/`.
 
 Each integrated task becomes one branch and pull request in the canonical stack,
 ordered from foundational work at the bottom to dependent work at the top. Land
@@ -108,12 +108,13 @@ Use a frame, fan-out, and synthesis protocol:
 Use `gpt-5.6-luna` for bounded research, implementation, and review. Escalate a
 research lane to the architect only when it requires cross-system judgment.
 
-## Local project artifacts
+## Temporary project artifacts
 
-Before fan-out, create a stable artifact root in the primary checkout:
+Before fan-out, invoke the `tmp` skill and create an artifact root in the primary
+checkout:
 
 ```text
-<primary-repository-root>/.tmp/projects/<project-key>/
+<primary-repository-root>/.agents/tmp/projects/<project-key>/
 ```
 
 Use the parent issue number when available and a stable descriptive key before
@@ -121,7 +122,7 @@ an issue exists. Pass the absolute path to every agent. Use these ownership
 boundaries:
 
 ```text
-.tmp/projects/<project-key>/
+.agents/tmp/projects/<project-key>/
 ├── orchestrator/
 ├── agents/<lane-id>/
 ├── pr-bodies/
@@ -129,13 +130,13 @@ boundaries:
 ```
 
 The orchestrator owns shared synthesis, integration logs, pull request bodies,
-and cleanup. Each sub-agent may write only within its assigned lane directory.
-Source inspection, edits, Git operations, and validation remain in the assigned
-code worktree.
+and cleanup. Each sub-agent may write only within its assigned lane directory
+and must report when each artifact is safe to remove. Source inspection, edits,
+Git operations, and validation remain in the assigned code worktree.
 
 Do not use OS `/tmp`, session temporary directories, task worktrees, `.git/`, or
 `target/` for plans, research, handoffs, validation logs, generated pull request
-bodies, or other uncommitted artifacts that another agent or session needs.
+bodies, or other uncommitted artifacts used by the workflow.
 Disposable one-command intermediates may use ephemeral storage only when no
 handoff depends on them.
 
@@ -148,7 +149,24 @@ the artifact root.
 Every handoff must report its artifact root, assigned directory, created or
 updated files, disposable files, state to promote to GitHub, and cleanup
 readiness. Reject handoffs that depend on missing or ephemeral files or write
-persistent artifacts outside their assigned directory.
+temporary artifacts outside their assigned directory.
+
+Clean up artifacts incrementally:
+
+1. Remove a lane's reports and logs after its handoff has been consumed,
+   required evidence has been reviewed, and its essential state is in GitHub.
+2. Remove generated pull request body files after confirming GitHub has the
+   current body and no pending update depends on the local file.
+3. Remove abandoned lane artifacts after preserving recoverable work and
+   recording the cancellation outcome.
+4. Before every checkpoint and session end, inspect the exact project artifact
+   directory and remove files and empty directories that no active lane,
+   pending integration, review, or recovery action needs.
+5. Record every retained artifact and why it is still required.
+
+Remove only specific, resolved files or directories. Never delete the
+`.agents/tmp/` root, use cleanup globs, or retain artifacts merely because they
+might be useful later.
 
 ## Parent project issue
 
@@ -440,7 +458,7 @@ stack are validated, and the pull request is submitted and described:
    and create or update draft pull requests.
 2. Fill out [the pull request template](../../../pull_request_template.md) for
    each integrated task. Generate the body at
-   `.tmp/projects/<project-key>/pr-bodies/<task-number>.md`. Include the parent
+   `.agents/tmp/projects/<project-key>/pr-bodies/<task-number>.md`. Include the parent
    project issue, close the task issue with a supported closing keyword, and
    describe the canonical behavior change, validation, and focused review
    notes. Do not duplicate stack metadata that `gh stack` already communicates.
@@ -471,10 +489,12 @@ contains the project outcome, move the task issues and parent issue to `Done`,
 and write the final checkpoint. Remove only clean staging and integration
 worktrees whose commits are integrated or intentionally abandoned.
 
-Retain the project artifact directory until validation evidence is reviewed,
-pull request bodies are applied, and essential state is promoted to GitHub.
-Then inspect and remove only that specific resolved project directory. Never
-remove the `.tmp/` root or use project-key globs.
+Clean up lane artifacts as soon as their evidence is consumed and essential
+state is promoted. Clean up pull request body files after confirming GitHub has
+the current body. At project completion, inspect and remove only the remaining
+specific resolved project directory after confirming no pending integration,
+review, or recovery action depends on it. Never remove the `.agents/tmp/` root
+or use project-key globs.
 
 ## Execution rules
 
@@ -503,6 +523,7 @@ remove the `.tmp/` root or use project-key globs.
   conflicting acceptance criteria, or a cross-task validation failure.
 - Keep issue and pull request bodies current, and use comments as the
   chronological activity log.
+- Clean up temporary artifacts after use and record why any artifact must remain.
 
 ## Required repository setup
 

@@ -36,8 +36,9 @@ expand your tools, scope, or ownership of GitHub state. If instructions are
 missing, contradictory, or impossible to follow, return a blocked handoff.
 
 When participating in fan-out, stay within the assigned question and exclusions.
-Do not duplicate another lane. Store persistent local artifacts only in the
-assigned project artifact directory.
+Do not duplicate another lane. Use the `tmp` skill for temporary artifacts,
+store them only in the assigned project artifact directory, and mark them for
+cleanup as soon as the orchestrator has consumed the handoff.
 
 Return this handoff:
 
@@ -79,4 +80,5 @@ implementation, and any conflicts or gaps.
 ## Artifacts
 
 The project artifact root, assigned directory, created or updated files, state
-that must be promoted to GitHub, and cleanup readiness.
+that must be promoted to GitHub, files that are safe to remove now, files that
+must remain with a reason, and cleanup readiness.

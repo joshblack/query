@@ -1,4 +1,4 @@
 /target
-/.tmp/
+/.agents/tmp/
 .DS_Store
 .env

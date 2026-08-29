@@ -78,6 +78,9 @@ For implementation:
    replace stale reviews.
 9. Merge the complete stack as a unit, then set the final Project status and
    update GitHub state before ending the session.
+10. Use the `tmp` skill to inspect the exact project artifact directory. Remove
+    consumed files and empty directories, and retain only artifacts required by
+    an active lane, pending integration, review, or recovery action.
 
 Do not silently change scope. If the next step requires a product or
 architectural decision, delegate the investigation and present a recommendation
@@ -87,4 +90,5 @@ before editing code.
 
 End with the Project status and project issue reflecting reality, even when no
 code was completed. Record what was learned, every current lane or blocker, and
-the exact next action for the next session.
+the exact next action for the next session. Record why any temporary artifact
+remains, and clean up everything that is no longer required.
