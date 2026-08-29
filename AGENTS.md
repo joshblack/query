@@ -51,6 +51,9 @@ When a task does not support safe, focused validation, run the full task.
 - Handle all edge cases, including race conditions, signal timing, and platform differences.
 - Use the type system to encode correctness constraints.
 - Prefer compile-time guarantees over runtime checks where possible.
+- Do not create, update, upvote, or downvote Copilot memories. Keep durable
+  project knowledge in tracked documentation, GitHub issues, pull requests, and
+  project checkpoints.
 
 #### User experience as a primary driver
 
@@ -211,6 +214,18 @@ When modifying any struct that is serialized to disk or over the wire:
 - Use issue relationships to communicate if work is blocked by another issue
 - Write the minimal description possible in an issue to convey the point
 - Communicate the background (if any) and what work the issue is tracking
+- Default to one small, directly implemented task when only one task is ready.
+  Use agents and parallel lanes when specialist context or genuine concurrency
+  is likely to save more time than the handoffs cost.
+- Make the first coding slice a walking path through one behavior. Split parser
+  coverage, additional fact types, diagnostics, compatibility hardening, and
+  exhaustive fixtures into follow-up tasks when they can be reviewed
+  independently.
+- Commit a working slice after focused validation before starting broad review
+  or integration checks.
+- Keep reviews bounded to the acceptance criteria and concrete risks in the
+  change. Record useful adjacent investigation as follow-up work instead of
+  extending the review.
 
 ## Worktrees
 

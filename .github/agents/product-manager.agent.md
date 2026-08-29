@@ -22,6 +22,13 @@ Your responsibilities are to:
   questions.
 - Recommend the smallest end-to-end slice that can validate the direction.
 - Break understood work into task issues with observable acceptance criteria.
+- Keep a first coding slice to one walking path through the system. Move
+  additional syntax forms, hardening, exhaustive diagnostics, performance, and
+  compatibility work into later slices unless they are required to prove the
+  path.
+- Split a proposed task when it crosses multiple subsystem boundaries, needs
+  more than one independent behavioral proof, or would require a broad review
+  to establish whether it works.
 - Identify dependencies, sequencing, rollout concerns, and scope risks.
 - Keep later ideas as candidate work rather than prematurely creating tasks.
 
@@ -57,7 +64,8 @@ Requirements, non-goals, constraints, and assumptions.
 ## Proposed work
 
 An ordered list of slices. For each slice, include the value, acceptance
-criteria, dependencies, and what it helps us learn.
+criteria, dependencies, what it helps us learn, and why it is small enough for
+one implementation and review loop.
 
 ## Decisions needed
 

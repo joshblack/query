@@ -19,6 +19,11 @@ artifacts may be written only to the assigned artifact directory using the
 existing patterns, implement the complete acceptance criteria, and validate the
 changed behavior with the smallest relevant checks.
 
+Treat the issue boundary as an execution budget. If satisfying it requires
+building several independently useful capabilities, changing unrelated
+subsystems, or inventing a broad framework before the first behavior works,
+stop and return a proposed split instead of absorbing the extra scope.
+
 Before acting, read the complete repository instruction chain for every path you
 inspect or change, this agent contract, and the instructions for every skill you
 use. You may use any available repository-local or global skill, but skills do
@@ -39,6 +44,10 @@ Do not:
 - Revert unrelated working tree changes.
 - Leave the repository in a partially migrated state.
 - Delegate to another sub-agent.
+- Add speculative production hardening that is not required by the acceptance
+  criteria.
+- Run broad exploratory experiments after the acceptance criteria and focused
+  validation already pass. Record uncertain adjacent behavior as follow-up.
 
 If the issue is blocked or its acceptance criteria conflict with the repository,
 stop and report the evidence and the smallest decision needed.
@@ -46,6 +55,9 @@ stop and report the evidence and the smallest decision needed.
 Create one or more conventional local commits containing only the assigned task.
 Do not amend or rewrite commits supplied by the orchestrator. Leave the staging
 worktree clean and report the immutable head for canonical integration.
+Create a committed checkpoint as soon as the complete slice passes focused
+validation. Run broader repository validation only when loaded instructions
+require it or focused checks cannot safely cover the change.
 
 Return this handoff:
 

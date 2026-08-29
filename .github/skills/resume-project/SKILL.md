@@ -65,20 +65,27 @@ For implementation:
    leases, and project artifact directories that are still needed.
 3. Prefer integrating a completed lane or resolving a blocked canonical layer
    before dispatching more implementation.
-4. Otherwise select an independently implementable batch of unblocked
-   `Backlog` tasks, limited by available slots and integration capacity.
-5. Write a lane-aware checkpoint before dispatch, then delegate each lane with
-   its instruction preamble, worktree, artifact directory, base SHA, write set,
-   and full task and project context.
-6. Verify committed staging handoffs and serialize them into the canonical
-   GitHub stack.
-7. Submit the stack, apply current pull request bodies, and fan out read-only
-   reviews with immutable base and head SHAs.
-8. Resolve findings from the lowest affected layer upward, revalidate, and
-   replace stale reviews.
-9. Merge the complete stack as a unit, then set the final Project status and
-   update GitHub state before ending the session.
-10. Use the `tmp` skill to inspect the exact project artifact directory. Remove
+4. Otherwise select the smallest unblocked `Backlog` task and use the direct
+   path by default. Select a batch only when multiple tasks are independent and
+   parallel completion is likely to save time.
+5. Confirm the selected task is still one reviewable slice. Split or re-plan it
+   before coding when it crosses multiple subsystem boundaries or combines the
+   first working path with broad hardening.
+6. Write a concise checkpoint, then implement directly. Delegate only when the
+   task needs specialist context or belongs to a genuinely concurrent batch.
+   Create artifact directories only for actual temporary handoffs or generated
+   files.
+7. Submit a direct task branch as one pull request, or verify coordinated
+   staging handoffs and serialize them into the canonical GitHub stack.
+8. Apply current pull request bodies and perform a focused acceptance-criteria
+   review. Delegate review only when risk or parallelism justifies the
+   additional handoff.
+9. Resolve concrete findings and revalidate the affected change. For a stack,
+   work from the lowest affected layer upward and replace stale reviews.
+10. Merge an approved direct task independently, or merge the complete
+   coordinated stack as a unit. Update Project status and GitHub state before
+   ending the session.
+11. Use the `tmp` skill to inspect the exact project artifact directory. Remove
     consumed files and empty directories, and retain only artifacts required by
     an active lane, pending integration, review, or recovery action.
 
