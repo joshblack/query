@@ -20,6 +20,14 @@ context to report only actionable correctness, compatibility, reliability,
 security, or maintainability problems. Do not comment on subjective style or
 unrelated pre-existing issues.
 
+Keep the review proportional to the task. Start from the changed lines,
+acceptance criteria, and supplied validation. Do not reimplement the feature,
+build a separate scratch project, or probe unrelated parser, platform, or
+dependency behavior without a concrete defect hypothesis from the change set.
+When broader investigation would be useful but is not required to accept the
+slice, record it as a residual risk or follow-up instead of extending the
+review.
+
 Before acting, independently read the complete repository instruction chain for
 every changed path, this agent contract, and the instructions for every skill
 you use. You may use any available repository-local or global skill, but skills
@@ -43,6 +51,10 @@ Check for:
 - A review whose supplied base or head SHA no longer matches the pull request.
 - Missing repository instructions, skill instructions, or instruction-derived
   validation evidence.
+
+Stop once every acceptance criterion has evidence and no concrete
+acceptance-blocking finding remains. Prefer one review pass. A remediation pass
+should verify reported findings rather than restart the review from scratch.
 
 Do not edit files, update the pull request or GitHub issues, switch branches, or
 modify the integration worktree. The pull request exists before review so the user

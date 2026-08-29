@@ -26,6 +26,11 @@ the user.
 
 ## Use the team deliberately
 
+Default to direct orchestration for one bounded, ready task. The orchestrator
+may inspect, implement, validate, commit, and submit that task in its dedicated
+worktree without delegating each phase. Use a sub-agent only when separate
+context, specialist judgment, or genuine parallelism is worth the handoff cost.
+
 Delegate bounded work with the complete context each agent needs:
 
 - [Product manager](../../agents/product-manager.agent.md): shape the outcome,
@@ -42,6 +47,12 @@ Delegate bounded work with the complete context each agent needs:
 Use at most five active sub-agents across all roles. A slot remains occupied
 until the agent returns a complete, blocked, failed, or acknowledged
 cancellation handoff. Sub-agents must not delegate further.
+
+Do not fan out a single sequential task. Fan out implementation only when at
+least two ready tasks are independent, the integration boundary is already
+clear, and parallel completion is likely to save time. A bounded specialist
+investigation may still use one sub-agent when it avoids loading substantial
+unrelated context into the orchestrator.
 
 For planning or research fan-out, define one shared question, evidence standard,
 evaluation rubric, synthesis owner, and mutually exclusive lane assignments.
@@ -68,10 +79,11 @@ setup, or instruction-derived validation.
 
 Before fan-out, invoke the `tmp` skill, create an artifact root under the primary
 checkout at `.agents/tmp/projects/<project-key>/`, and assign each agent an
-exclusive subdirectory. Temporary plans, research, handoffs, logs, and generated
-pull request bodies belong there, not in OS or session temporary directories.
-GitHub remains the durable source of truth. Clean up each artifact after it is
-consumed and its essential state is promoted.
+exclusive subdirectory. For the direct path, create temporary artifacts only
+when a concrete plan, handoff, log, or generated body needs to persist. Do not
+create empty coordination scaffolding. GitHub remains the durable source of
+truth. Clean up each artifact after it is consumed and its essential state is
+promoted.
 
 ## Plan before persisting
 
@@ -90,10 +102,10 @@ After approval:
 6. Record acceptance criteria and native issue dependency relationships.
 7. Plan the issue dependency graph, independently implementable batches, and
    deterministic canonical stack integration order.
-8. Create one integration worktree and one staging worktree per active
-   implementation lane under the sibling `query.worktrees/` directory.
-9. Create the project artifact root and lane directories in the primary
-   checkout.
+8. Choose the direct path for one bounded ready task, or the coordinated path
+   for concurrent lanes or a multi-layer stack.
+9. Create only the worktrees and artifact directories required by the chosen
+   path under the sibling `query.worktrees/` directory and the primary checkout.
 10. Set the Project status, write the first lane-aware checkpoint, and identify
     the next planning, implementation, or integration action.
 
@@ -102,32 +114,36 @@ Labels classify work only. The GitHub Project owns lifecycle state.
 
 ## Execute incrementally
 
-Work in bounded batches while preserving one canonical stack:
+Work in bounded slices. Use a canonical stack only for the coordinated path:
 
 1. Reconstruct the latest state from GitHub and the working tree.
-2. Select up to five total planning, research, implementation, or review lanes,
-   accounting for every active sub-agent.
+2. Choose the direct path unless concurrent or specialist work has a clear
+   expected benefit.
 3. For implementation, choose only independent `Backlog` tasks with no open
    `blocked by` relationships and complete lane manifests.
-4. Set dispatched task issues to `In Progress`, create exclusive staging
-   worktrees and branches from the recorded base, and write a checkpoint.
-5. Delegate implementation with the full instruction preamble, worktree and
-   artifact paths, write lease, base SHA, issue context, decisions, and
-   validation requirements.
-6. Verify each returned staging head, instruction inventory, local commits,
-   validation, write set, and clean worktree.
-7. Integrate completed lanes in deterministic dependency order by cherry-picking
-   them into canonical stack layers in the integration worktree.
-8. Validate the assembled stack, submit it, generate pull request bodies under
-   the project artifact root, apply the bodies, and mark the pull requests
-   ready.
-9. Set integrated tasks to `In Review` and fan out read-only reviews with
-   immutable base and head SHAs.
-10. Resolve findings from the lowest affected stack layer upward, expire stale
-    reviews after SHA changes, and keep all pull request bodies current.
-11. Merge the complete approved stack as a unit, then set task and parent
-    statuses to `Done`, promote essential state to GitHub, and write the final
-    checkpoint.
+4. Confirm that each selected task is a small reviewable slice. Split it before
+   implementation when it crosses multiple subsystem boundaries, requires more
+   than one independent behavioral proof, or combines a walking skeleton with
+   production hardening.
+5. Set active task issues to `In Progress`, create the required worktree and
+   branch from the recorded base, and write a concise checkpoint.
+6. Implement directly, or delegate only when the coordinated path applies. In
+   either case, produce a committed checkpoint after focused validation before
+   beginning broader review or integration.
+7. On the direct path, submit the task branch as one pull request. On the
+   coordinated path, integrate completed lanes in deterministic dependency order
+   and submit the canonical stack.
+8. Run the instruction-required validation, fill the pull request template, and
+   mark the pull request ready.
+9. Set submitted tasks to `In Review` and perform a focused review against the
+   acceptance criteria. Delegate a read-only review only for elevated risk,
+   substantial changes, or useful parallel review capacity.
+10. Resolve concrete findings, revalidate the affected change, and keep pull
+    request bodies current. For a stack, work from the lowest affected layer
+    upward and expire reviews made stale by SHA changes.
+11. Merge an approved direct task independently, or merge a complete coordinated
+    stack as a unit. Update task and parent status based on the project outcome,
+    promote essential state to GitHub, and write the final checkpoint.
 12. Inspect the exact project artifact directory and remove temporary files and
     empty lane directories that no active lane, pending integration, review, or
     recovery action still needs.

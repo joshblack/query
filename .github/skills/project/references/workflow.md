@@ -7,16 +7,17 @@ Issue labels classify the kind of work. The
 [configured GitHub Project](./config.md) owns lifecycle state through its
 built-in `Status` field. Do not encode lifecycle state in labels.
 
-Each project lands as one canonical GitHub stack. Parallel implementation occurs
-on isolated staging branches in dedicated worktrees, then the orchestrator
-serializes completed commits through one canonical integration worktree. The
-primary repository checkout remains available for user work and stores ignored
-temporary project artifacts under `.agents/tmp/projects/`.
+Each task lands either as one direct pull request or as one layer in a
+coordinated GitHub stack. Parallel implementation occurs on isolated staging
+branches in dedicated worktrees, then the orchestrator serializes completed
+commits through one canonical integration worktree. The primary repository
+checkout remains available for user work and stores ignored temporary project
+artifacts under `.agents/tmp/projects/`.
 
-Each integrated task becomes one branch and pull request in the canonical stack,
-ordered from foundational work at the bottom to dependent work at the top. Land
-the project with the stack merge command rather than merging its pull requests
-or staging branches individually.
+Merge an approved direct task independently so the project can learn from it
+before planning the next slice. For coordinated work, each integrated task
+becomes one branch and pull request in dependency order, and the complete stack
+lands with the stack merge command rather than individual pull request merges.
 
 ## Ownership
 
@@ -26,6 +27,33 @@ implement, review, and return structured handoffs.
 
 This ownership rule prevents concurrent agents from overwriting each other and
 makes the project understandable from GitHub alone.
+
+## Execution modes
+
+Use the lightest process that preserves a durable, reviewable result.
+
+### Direct path
+
+The direct path is the default when one bounded task is ready. The orchestrator
+uses one dedicated task worktree and branch, implements the issue, runs focused
+validation, creates a conventional commit, submits the pull request, and reviews
+the result against the acceptance criteria.
+
+The direct path does not require an integration worktree, staging handoff,
+agent lane, or project artifact directory unless the task produces a concrete
+temporary file that must persist. GitHub issues, commits, pull requests, and
+checkpoints remain the durable record.
+
+### Coordinated path
+
+Use the coordinated path when at least two ready tasks can progress
+independently, a specialist investigation needs separate context, or a
+multi-layer stack materially reduces integration risk. This path uses leased
+staging worktrees, agent lanes, an integration worktree, and temporary project
+artifacts as described below.
+
+Do not use the coordinated path only because the project has multiple future
+tasks. The work must be ready and concurrently actionable now.
 
 ## Concurrency and leases
 
@@ -85,6 +113,18 @@ mise run test
 Use focused variants only when the task supports them without changing workspace
 feature resolution. Otherwise, run the full task. Validation at a staging head
 does not replace validation after canonical integration.
+
+Run validation in increasing scope:
+
+1. Run the smallest check that proves the changed behavior while implementing.
+2. Commit the complete slice once its focused checks pass.
+3. Run instruction-required repository checks before submitting the pull
+   request.
+4. Run cross-task checks only after assembling multiple coordinated layers.
+
+Do not turn a validation configuration problem into an open-ended feature
+investigation. Record the mismatch, use the smallest reliable equivalent check,
+and create follow-up work when the configuration itself needs repair.
 
 ## Planning and research fan-out
 
@@ -252,6 +292,16 @@ Use this marker, replacing the parent number:
 ```
 
 Each task must be independently reviewable and should produce useful progress.
+Prefer no more than one primary behavior and one validation story per task. A
+task is too broad when it combines multiple independently useful capabilities,
+crosses several subsystem boundaries, or bundles the first working path with
+exhaustive syntax coverage, diagnostics, performance, and compatibility
+hardening.
+
+The first coding task should be a walking skeleton that proves one end-to-end
+path. Additional forms and hardening belong in follow-up tasks unless they are
+required for that path to function.
+
 Use this body shape:
 
 ```markdown
@@ -377,8 +427,12 @@ make the project impossible to reconstruct from GitHub.
 
 ## Worktree and stack setup
 
-Create the integration worktree after the project brief and issue graph are
-approved, before implementation starts:
+For the direct path, create one dedicated task worktree and branch from the
+recorded default-branch base. That branch is the canonical pull request branch,
+so no staging handoff or cherry-pick is required.
+
+For the coordinated path, create the integration worktree after the project
+brief and issue graph are approved, before implementation starts:
 
 1. Fetch the default branch and confirm the primary checkout does not contain
    project changes that need to move.
@@ -450,9 +504,23 @@ blocked, or ready for a revised assignment.
 
 ## Pull request and review flow
 
-Each canonical task branch has one pull request. A task is ready for review only
-after its staging commits are integrated, the canonical layer and assembled
-stack are validated, and the pull request is submitted and described:
+Each task branch has one pull request. A task is ready for review after its
+commits are complete, the required validation passes, and the pull request is
+submitted and described.
+
+For the direct path:
+
+1. Push the task branch and create one pull request against the default branch.
+2. Fill out [the pull request template](../../../pull_request_template.md).
+   Generate a temporary body file only when needed to apply the template.
+3. Mark the pull request ready.
+4. Move the task to `In Review`, record its immutable base and head SHAs, and
+   perform a focused review.
+5. Merge the approved pull request, confirm the default branch contains the
+   task outcome, move the task to `Done`, and revisit the project plan before
+   selecting the next slice.
+
+For the coordinated path:
 
 1. Run `gh stack submit --auto` from the integration worktree to push the stack
    and create or update draft pull requests.
@@ -467,22 +535,32 @@ stack are validated, and the pull request is submitted and described:
    required.
 4. Mark each submitted pull request ready with `gh pr ready <number>`.
 5. Move the integrated tasks to `In Review`, record immutable base and head SHAs
-   in the checkpoint, and fan out read-only reviewers within the five-slot
-   limit.
+   in the checkpoint, and perform a focused review. Delegate read-only reviewers
+   within the five-slot limit only when risk, change size, or available
+   parallelism justifies the handoff.
 
 Creating the pull request before delegating review lets the user and reviewer
 inspect the same change at the same time. The reviewer is read-only and must not
-modify the integration worktree or pull request. A review becomes stale when its
-base or head SHA changes. Collect findings where practical, resolve them from the
-lowest affected stack layer upward, rebase and resubmit upstack branches, update
-every affected pull request body, and repeat materially invalidated reviews.
+modify the task or integration worktree or pull request. A review becomes stale
+when its base or head SHA changes. For coordinated work, collect findings where
+practical, resolve them from the lowest affected stack layer upward, rebase and
+resubmit upstack branches, update every affected pull request body, and repeat
+materially invalidated reviews.
 
-An approved pull request remains open while later stack layers are integrated.
-After every committed task is approved and the project success criteria are
-satisfied, synchronize the stack and use GitHub's atomic stack merge with
-`gh stack merge <stack-number> --yes` and an explicit repository-appropriate
-`--merge`, `--squash`, or `--rebase` flag. Do not use `gh pr merge` for project
-stack pull requests. If any pull request cannot merge, none of the stack lands.
+Review starts from the issue acceptance criteria, changed lines, and validation
+evidence. Do not reimplement the task or create broad scratch experiments
+without a concrete defect hypothesis. Stop when the criteria have evidence and
+no acceptance-blocking finding remains. Record adjacent concerns as residual
+risks or follow-up issues. After remediation, verify the reported findings
+instead of restarting the full review.
+
+An approved coordinated pull request remains open while later stack layers are
+integrated. After every committed task is approved and the project success
+criteria are satisfied, synchronize the stack and use GitHub's atomic stack
+merge with `gh stack merge <stack-number> --yes` and an explicit
+repository-appropriate `--merge`, `--squash`, or `--rebase` flag. Do not use
+`gh pr merge` for project stack pull requests. If any pull request cannot merge,
+none of the stack lands.
 
 After the stack lands, run `gh stack sync --prune`, confirm the default branch
 contains the project outcome, move the task issues and parent issue to `Done`,
@@ -499,6 +577,9 @@ or use project-key globs.
 ## Execution rules
 
 - Use at most five active sub-agents across all roles.
+- Default to the direct path for one bounded ready task.
+- Use the coordinated path only for genuine concurrency, specialist context, or
+  a stack whose integration risk justifies the overhead.
 - Do not allow sub-agents to delegate further.
 - Select only independent `Backlog` tasks with no open `blocked by`
   relationships for the same implementation batch.
@@ -514,9 +595,11 @@ or use project-key globs.
 - Move issues to `Blocked` when an open native dependency prevents progress.
 - Move unblocked issues back to `Backlog`.
 - Run only one editing agent at a time in the canonical integration worktree.
-- Fan out read-only reviews only against immutable base and head SHAs.
-- Review before marking a task complete.
-- Do not merge task pull requests individually.
+- Fan out read-only reviews only against immutable base and head SHAs and only
+  when delegation is justified.
+- Perform a focused review before marking a task complete.
+- Merge direct task pull requests independently.
+- Do not merge coordinated stack pull requests individually.
 - Do not close a task only because code exists or review is complete. Confirm
   its acceptance criteria and validation after the full stack lands.
 - Re-plan when a lane reveals a false assumption, overlapping ownership,
