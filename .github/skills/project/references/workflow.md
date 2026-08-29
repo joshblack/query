@@ -7,11 +7,16 @@ Issue labels classify the kind of work. The
 [configured GitHub Project](./config.md) owns lifecycle state through its
 built-in `Status` field. Do not encode lifecycle state in labels.
 
-Each project is implemented as one GitHub stack in one dedicated git worktree.
-The primary repository checkout remains available for user work. Each committed
-task becomes one branch and pull request in the stack, ordered from foundational
-work at the bottom to dependent work at the top. Land the project with the stack
-merge command rather than merging its pull requests individually.
+Each project lands as one canonical GitHub stack. Parallel implementation occurs
+on isolated staging branches in dedicated worktrees, then the orchestrator
+serializes completed commits through one canonical integration worktree. The
+primary repository checkout remains available for user work and stores ignored
+project artifacts under `.tmp/projects/`.
+
+Each integrated task becomes one branch and pull request in the canonical stack,
+ordered from foundational work at the bottom to dependent work at the top. Land
+the project with the stack merge command rather than merging its pull requests
+or staging branches individually.
 
 ## Ownership
 
@@ -21,6 +26,129 @@ implement, review, and return structured handoffs.
 
 This ownership rule prevents concurrent agents from overwriting each other and
 makes the project understandable from GitHub alone.
+
+## Concurrency and leases
+
+Use one orchestrator-owned limit of five active sub-agents across the project.
+Product managers, architects, researchers, implementers, reviewers, synthesis
+agents, and integration-remediation agents each consume one slot from dispatch
+until they return a complete, blocked, failed, or acknowledged cancellation
+handoff.
+
+The orchestrator, queued assignments, completed handoffs, and direct GitHub
+operations do not consume slots. Do not reserve a slot for synthesis or
+integration. Dispatch fewer than five agents when integration or review capacity
+is the bottleneck.
+
+Sub-agents must not delegate further. Every editing agent receives one exclusive
+worktree and branch lease. No two editing agents may use the same worktree,
+branch, or canonical stack at the same time. Read-only reviews may run in
+parallel against immutable base and head SHAs.
+
+## Instructions and skills
+
+Every delegation must provide the repository root, worktree if applicable,
+expected branch and base SHA, scope, expected paths, relevant skills, validation
+expectations, write lease, project artifact root, and assigned artifact
+directory.
+
+Before substantive work, each agent must:
+
+1. Read the root `AGENTS.md`.
+2. Discover and read each nested `AGENTS.md` that applies to its scope.
+3. Read its agent contract.
+4. Read the `SKILL.md` and required references for every skill it uses.
+5. Summarize the setup, style, validation, ownership, and scope obligations.
+6. Re-check for nested instructions before entering a new subtree.
+7. Stop as blocked when required instructions are unavailable, contradictory,
+   or impossible to follow.
+
+All agents may use available repository-local and global skills. Skills provide
+instructions and reusable workflows, but do not expand tools, scope, write
+leases, branch authority, concurrency slots, or ownership of GitHub state.
+
+Every handoff must identify the instruction and skill files loaded, derived
+obligations, newly checked subtrees, environment setup, exact validation
+requirements, and any conflicts. For implementation, compare the inventory with
+the actual changed paths and reject the handoff if instructions or required
+validation were missed.
+
+For this repository, implementation validation is derived from `AGENTS.md` and
+defaults to:
+
+```sh
+mise run fmt
+mise run lint
+mise run test
+```
+
+Use focused variants only when the task supports them without changing workspace
+feature resolution. Otherwise, run the full task. Validation at a staging head
+does not replace validation after canonical integration.
+
+## Planning and research fan-out
+
+Use a frame, fan-out, and synthesis protocol:
+
+1. Record the repository commit, shared question, constraints, evidence
+   requirements, evaluation rubric, output format, and synthesis owner.
+2. Assign mutually exclusive lanes with a unique question or hypothesis,
+   explicit exclusions, and awareness of the other lane assignments.
+3. Use the product manager for outcomes and scope, the architect for system
+   constraints and consequential options, and researchers for bounded evidence
+   gathering.
+4. Require citations, disconfirming evidence, unresolved unknowns, and
+   confidence from each lane.
+5. After the fan-out completes, use an architect on `gpt-5.6-sol` for technical
+   synthesis or the product manager on `gpt-5.6-sol` when product judgment
+   dominates.
+6. Reconcile conflicts against the shared rubric and produce one
+   dependency-aware recommendation before changing durable project state.
+
+Use `gpt-5.6-luna` for bounded research, implementation, and review. Escalate a
+research lane to the architect only when it requires cross-system judgment.
+
+## Local project artifacts
+
+Before fan-out, create a stable artifact root in the primary checkout:
+
+```text
+<primary-repository-root>/.tmp/projects/<project-key>/
+```
+
+Use the parent issue number when available and a stable descriptive key before
+an issue exists. Pass the absolute path to every agent. Use these ownership
+boundaries:
+
+```text
+.tmp/projects/<project-key>/
+├── orchestrator/
+├── agents/<lane-id>/
+├── pr-bodies/
+└── generated/
+```
+
+The orchestrator owns shared synthesis, integration logs, pull request bodies,
+and cleanup. Each sub-agent may write only within its assigned lane directory.
+Source inspection, edits, Git operations, and validation remain in the assigned
+code worktree.
+
+Do not use OS `/tmp`, session temporary directories, task worktrees, `.git/`, or
+`target/` for plans, research, handoffs, validation logs, generated pull request
+bodies, or other uncommitted artifacts that another agent or session needs.
+Disposable one-command intermediates may use ephemeral storage only when no
+handoff depends on them.
+
+GitHub issues, Project fields, checkpoints, pull requests, and tracked files
+remain the durable source of truth. Promote essential conclusions, decisions,
+blockers, and next actions to GitHub before ending a session. Never store
+credentials, tokens, environment secrets, or unnecessary sensitive output in
+the artifact root.
+
+Every handoff must report its artifact root, assigned directory, created or
+updated files, disposable files, state to promote to GitHub, and cleanup
+readiness. Reject handoffs that depend on missing or ephemeral files or write
+persistent artifacts outside their assigned directory.
 
 ## Parent project issue
 
@@ -74,12 +202,15 @@ The user-visible result and why it matters.
 <!-- project-state:start -->
 ## Current state
 
-- **Active task:** #123 or none
-- **Worktree:** An absolute path, or not created
-- **Stack:** The stack number and branch chain, or not submitted
-- **Pull request:** The active task pull request, or none
+- **Phase:** Planning, implementing, integrating, in review, blocked, or done
+- **Integration worktree:** An absolute path, or not created
+- **Artifact root:** An absolute path, or not created
+- **Canonical stack:** The stack number, base SHA, and branch chain, or not submitted
+- **Active lanes:** Task, worktree, branch, base and head SHAs, and phase, or none
+- **Parked lanes:** Completed, blocked, or cancelled staging lanes, or none
+- **Pull requests:** Pull requests under review with base and head SHAs, or none
 - **Last checkpoint:** YYYY-MM-DD
-- **Next action:** A concrete action another session can take.
+- **Next action:** The next planning, lane, integration, or review action.
 - **Blockers:** None, or linked blockers and the decision needed.
 <!-- project-state:end -->
 ```
@@ -140,7 +271,7 @@ Add every parent and task issue to the repository's configured GitHub Project.
 Use the built-in `Status` field as the lifecycle source of truth:
 
 - `Backlog`: Defined work that is not actively being implemented.
-- `In Progress`: The task currently being implemented.
+- `In Progress`: A task with an active staging or integration lane.
 - `In Review`: Implementation is complete and review is active.
 - `Blocked`: The issue has one or more open native `blocked by` relationships,
   or the checkpoint identifies a decision that prevents progress.
@@ -151,10 +282,11 @@ are actionable and it has no open `blocked by` relationships. When a blocker is
 added, move the issue to `Blocked`. When all blockers close, move it back to
 `Backlog`.
 
-The parent project issue remains `In Progress` while committed child work is
-active. Set it to `Blocked` only when no project work can proceed. Set it to
-`Done` only when the project success criteria are complete or the issue records
-why the project ended.
+Multiple child tasks may be `In Progress` or `In Review` when they have exclusive
+lanes or canonical pull requests. The parent project issue remains `In Progress`
+while any viable lane, integration, or review work is active. Set it to `Blocked`
+only when no project work can proceed. Set it to `Done` only when the project
+success criteria are complete or the issue records why the project ended.
 
 A task remains `In Review` after its pull request is approved. Move all tasks in
 the stack to `Done` only after the full stack lands and the task acceptance
@@ -165,7 +297,9 @@ lifecycle labels.
 
 ## Checkpoints
 
-Add a checkpoint comment after planning, after each completed or blocked task,
+Add a checkpoint comment after planning or synthesis, before dispatching an
+implementation batch, after a lane becomes ready, blocked, or cancelled, after
+an integration batch is submitted, after review remediation changes stack SHAs,
 and before ending a session:
 
 ```markdown
@@ -176,12 +310,16 @@ and before ending a session:
 - **Learned:** Information that affects the plan.
 - **Decisions:** Decisions made or still needed.
 - **Validation:** Checks completed and unresolved findings.
-- **Active task:** #123
-- **Worktree:** The project worktree path.
-- **Stack:** The stack number and branch chain.
-- **Pull request:** The active task pull request.
+- **Integration worktree:** The canonical integration worktree path.
+- **Artifact root:** The project artifact root in the primary checkout.
+- **Canonical stack:** The stack number, base SHA, and branch chain.
+- **Pull requests:** Active reviews with immutable base and head SHAs.
 - **Blockers:** None, or the blocker and owner.
-- **Next action:** The exact next recommended action.
+- **Next action:** The exact next planning, lane, integration, or review action.
+
+| Task | Phase | Worktree | Branch | Base/head | PR | Status | Next action |
+|---|---|---|---|---|---|---|---|
+| #123 | implementing | `/path` | `branch` | `abc/def` | none | active | Await handoff |
 ```
 
 Update the parent issue's managed current state block to match the latest
@@ -209,68 +347,119 @@ Before selecting work, compare:
 - Linked pull requests and their merge state.
 - The GitHub stack order and approval state.
 - Applicable decision records.
-- The project worktree, current branch, working tree, and relevant commits.
+- The integration and staging worktrees, branch leases, working trees, expected
+  bases, committed staging heads, and relevant commits.
+- The recorded artifact root and referenced artifacts.
 
 Issues record intent and durable context. The GitHub Project records lifecycle.
-The repository records what has actually been implemented. When they disagree,
-report the mismatch and update the Project and checkpoint after resolving it.
+The repository records what has actually been implemented. Local artifacts hold
+supporting evidence only. When they disagree, report the mismatch and update the
+Project and checkpoint after resolving it. A missing local artifact must not
+make the project impossible to reconstruct from GitHub.
 
 ## Worktree and stack setup
 
-Create the project worktree after the project brief and issue tree are approved,
-before implementation starts:
+Create the integration worktree after the project brief and issue graph are
+approved, before implementation starts:
 
 1. Fetch the default branch and confirm the primary checkout does not contain
    project changes that need to move.
-2. Create a sibling worktree outside the primary checkout. Use a stable,
-   descriptive path based on the repository and parent issue, such as
-   `../query-worktrees/project-123`. Create the first branch and worktree with
-   `git worktree add -b <branch> <path> <default-branch>`.
-3. Create the bottom stack branch in that worktree from the current default
-   branch. Use a descriptive branch name that includes the parent or task issue
-   number.
-4. Run `gh stack init <branch>` from the project worktree. Always pass branch
-   names, and configure `rerere.enabled` and `remote.pushDefault` first so the
-   command remains non-interactive.
-5. Record the worktree path and stack branch chain in the parent issue's managed
-   current state and checkpoint.
+2. Create a sibling integration worktree at a stable path such as
+   `../query.worktrees/project-123-integration`.
+3. Create the bottom canonical stack branch in that worktree from the recorded
+   default-branch base SHA. Use a descriptive branch name that includes the
+   parent or task issue number.
+4. Run `gh stack init <branch>` from the integration worktree. Always pass
+   branch names, and configure `rerere.enabled` and `remote.pushDefault` first
+   so the command remains non-interactive.
+5. Create the project artifact root and record its absolute path, the integration
+   worktree, canonical base SHA, and stack branch chain in the managed state and
+   checkpoint.
 
-Reuse the same project worktree for every layer. Add each later branch with
-`gh stack add <branch>` only when its task becomes active. Do not create branches
-for candidate or insufficiently understood work. Keep unrelated changes out of
-the project worktree.
+For each implementation batch, select an antichain of actionable tasks that do
+not depend on one another and have compatible integration contracts. Before
+dispatch, record a lane manifest containing:
+
+```text
+Task issue
+Expected base SHA
+Worktree path
+Staging branch
+Expected files, modules, or interface boundary
+Applicable instruction roots and skills
+Acceptance criteria
+Validation
+Integration order and rationale
+Agent role and model
+Artifact directory and ownership
+```
+
+Create one staging branch and worktree per task from the same recorded batch
+base or an already-stable foundational stack commit:
+
+```text
+../query.worktrees/project-123-task-456
+project-123/task-456-work
+```
+
+Exactly one implementer owns each staging worktree and branch. Implementers may
+create task-scoped conventional local commits but must not create or switch
+branches, manage worktrees, run `gh stack`, or update GitHub.
+
+After a lane completes, freeze its reported head SHA and verify its base,
+commits, changed paths, instruction inventory, validation, and clean state.
+Choose a deterministic topological integration order. For each lane:
+
+1. Create the corresponding canonical stack branch in the integration worktree.
+2. Cherry-pick the lane commits into that layer.
+3. Validate the layer relative to its immediate stack base.
+4. Continue with the next completed lane.
+5. Run cross-task validation on the assembled canonical stack.
+
+Staging branches do not receive pull requests. The canonical stack contains one
+pull request per integrated task layer.
 
 Plan stack layers in dependency order. A lower branch must contain everything a
 higher branch needs. If implementation reveals that a lower layer must change,
-navigate to that branch, commit the change there, run
-`gh stack rebase --upstack`, and return to the active branch.
+serialize remediation through the integration worktree, commit the change in the
+lowest affected layer, and run `gh stack rebase --upstack`. Do not send
+concurrent implementers into separate layers of the canonical stack.
+
+If replanning changes an active lane's scope, request cancellation and wait for
+an acknowledged terminal handoff before releasing its slot. Inspect and preserve
+recoverable work, then record whether the lane is abandoned, superseded,
+blocked, or ready for a revised assignment.
 
 ## Pull request and review flow
 
-Each task branch has one pull request. A task is ready for review only after its
-changes are committed, validated, submitted, and described:
+Each canonical task branch has one pull request. A task is ready for review only
+after its staging commits are integrated, the canonical layer and assembled
+stack are validated, and the pull request is submitted and described:
 
-1. Run `gh stack submit --auto` from the project worktree to push the stack and
-   create or update draft pull requests.
+1. Run `gh stack submit --auto` from the integration worktree to push the stack
+   and create or update draft pull requests.
 2. Fill out [the pull request template](../../../pull_request_template.md) for
-   the active task. Include the parent project issue, close the task issue with
-   a supported closing keyword, and describe the behavior changed, validation,
-   and focused review notes. Do not duplicate stack metadata that `gh stack`
-   already communicates.
-3. Update the pull request with `gh pr edit --body-file <path>`. The stack
+   each integrated task. Generate the body at
+   `.tmp/projects/<project-key>/pr-bodies/<task-number>.md`. Include the parent
+   project issue, close the task issue with a supported closing keyword, and
+   describe the canonical behavior change, validation, and focused review
+   notes. Do not duplicate stack metadata that `gh stack` already communicates.
+3. Update each pull request with `gh pr edit --body-file <path>`. The stack
    extension generates titles and initial bodies, so the explicit edit is
    required.
-4. Mark the active pull request ready with `gh pr ready <number>`.
-5. Move the task to `In Review`, link the pull request in the checkpoint, and
-   delegate the reviewer against that pull request.
+4. Mark each submitted pull request ready with `gh pr ready <number>`.
+5. Move the integrated tasks to `In Review`, record immutable base and head SHAs
+   in the checkpoint, and fan out read-only reviewers within the five-slot
+   limit.
 
 Creating the pull request before delegating review lets the user and reviewer
 inspect the same change at the same time. The reviewer is read-only and must not
-modify the project worktree or pull request. Address findings on the same stack
-branch, rebase branches above it when needed, submit the stack again, and keep
-the pull request body current.
+modify the integration worktree or pull request. A review becomes stale when its
+base or head SHA changes. Collect findings where practical, resolve them from the
+lowest affected stack layer upward, rebase and resubmit upstack branches, update
+every affected pull request body, and repeat materially invalidated reviews.
 
-An approved pull request remains open while later stack layers are implemented.
+An approved pull request remains open while later stack layers are integrated.
 After every committed task is approved and the project success criteria are
 satisfied, synchronize the stack and use GitHub's atomic stack merge with
 `gh stack merge <stack-number> --yes` and an explicit repository-appropriate
@@ -279,25 +468,39 @@ stack pull requests. If any pull request cannot merge, none of the stack lands.
 
 After the stack lands, run `gh stack sync --prune`, confirm the default branch
 contains the project outcome, move the task issues and parent issue to `Done`,
-write the final checkpoint, and remove the project worktree only when it is
-clean.
+and write the final checkpoint. Remove only clean staging and integration
+worktrees whose commits are integrated or intentionally abandoned.
+
+Retain the project artifact directory until validation evidence is reviewed,
+pull request bodies are applied, and essential state is promoted to GitHub.
+Then inspect and remove only that specific resolved project directory. Never
+remove the `.tmp/` root or use project-key globs.
 
 ## Execution rules
 
-- Select only a `Backlog` task with no open `blocked by` relationships.
-- Move active tasks to `In Progress` before implementation.
-- Create or switch to the task's stack branch in the project worktree before
-  implementation.
-- Submit a pull request and fill its body before moving the task to `In Review`.
+- Use at most five active sub-agents across all roles.
+- Do not allow sub-agents to delegate further.
+- Select only independent `Backlog` tasks with no open `blocked by`
+  relationships for the same implementation batch.
+- Move dispatched tasks to `In Progress` before implementation.
+- Give every editing agent an exclusive staging worktree, branch, write lease,
+  base SHA, and artifact directory.
+- Require implementers to return task-scoped conventional commits and a clean
+  staging worktree.
+- Verify instruction coverage and required `mise` validation before integration.
+- Serialize staging commits through the canonical integration worktree.
+- Submit canonical pull requests and fill their bodies before moving tasks to
+  `In Review`.
 - Move issues to `Blocked` when an open native dependency prevents progress.
 - Move unblocked issues back to `Backlog`.
-- Run one editing agent at a time in the project worktree.
+- Run only one editing agent at a time in the canonical integration worktree.
+- Fan out read-only reviews only against immutable base and head SHAs.
 - Review before marking a task complete.
 - Do not merge task pull requests individually.
 - Do not close a task only because code exists or review is complete. Confirm
   its acceptance criteria and validation after the full stack lands.
-- Re-plan when implementation reveals a false assumption or changes the value
-  of later work.
+- Re-plan when a lane reveals a false assumption, overlapping ownership,
+  conflicting acceptance criteria, or a cross-task validation failure.
 - Keep issue and pull request bodies current, and use comments as the
   chronological activity log.
 

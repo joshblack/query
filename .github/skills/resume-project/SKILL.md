@@ -36,16 +36,20 @@ Read:
 - Linked pull requests and merge state.
 - The GitHub stack order, approval state, and rebase status.
 - Referenced decision records.
-- The recorded project worktree, current branch, working tree, and relevant
-  commits.
+- The recorded integration and staging worktrees, branches, base and head SHAs,
+  working trees, and relevant commits.
+- The project artifact root and every referenced lane artifact. Missing local
+  evidence must be reported, but GitHub state must remain sufficient to resume
+  on another machine.
 
 Then summarize:
 
 - The intended outcome and remaining success criteria.
 - Completed work and evidence.
-- The active task and its `Status`, if it is still valid.
+- Every active, parked, ready-to-integrate, in-review, blocked, or cancelled
+  lane and its `Status`.
 - Blockers, unresolved review findings, and decisions needed.
-- The next `Backlog` task with no open `blocked by` relationships.
+- The next safe planning, implementation, integration, or review action.
 - Any mismatch between GitHub and the repository.
 
 ## Continue safely
@@ -56,19 +60,23 @@ new work.
 
 For implementation:
 
-1. Select one unblocked `Backlog` task.
-2. Set it to `In Progress`, update the parent issue's active task, and write a
-   checkpoint.
-3. Restore or create the dedicated project worktree, then create or switch to
-   the task's branch in the recorded GitHub stack.
-4. Delegate to the implementer with the worktree path and full task and project
-   context.
-5. Commit the layer, submit the stack, fill the pull request body, and mark the
-   pull request ready.
-6. Set it to `In Review` and delegate review against the pull request.
-7. Resolve findings and keep approved pull requests open until all stack layers
-   are ready.
-8. Merge the complete stack as a unit, then set the final Project status and
+1. Reconcile the five-slot ledger from live agents and terminal handoffs.
+2. Restore the canonical integration worktree, staging lanes, exclusive branch
+   leases, and project artifact directories that are still needed.
+3. Prefer integrating a completed lane or resolving a blocked canonical layer
+   before dispatching more implementation.
+4. Otherwise select an independently implementable batch of unblocked
+   `Backlog` tasks, limited by available slots and integration capacity.
+5. Write a lane-aware checkpoint before dispatch, then delegate each lane with
+   its instruction preamble, worktree, artifact directory, base SHA, write set,
+   and full task and project context.
+6. Verify committed staging handoffs and serialize them into the canonical
+   GitHub stack.
+7. Submit the stack, apply current pull request bodies, and fan out read-only
+   reviews with immutable base and head SHAs.
+8. Resolve findings from the lowest affected layer upward, revalidate, and
+   replace stale reviews.
+9. Merge the complete stack as a unit, then set the final Project status and
    update GitHub state before ending the session.
 
 Do not silently change scope. If the next step requires a product or
@@ -78,5 +86,5 @@ before editing code.
 ## Leave another durable checkpoint
 
 End with the Project status and project issue reflecting reality, even when no
-code was completed. Record what was learned, the current blocker or active task,
-and the exact next action for the next session.
+code was completed. Record what was learned, every current lane or blocker, and
+the exact next action for the next session.

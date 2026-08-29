@@ -201,7 +201,7 @@ When modifying any struct that is serialized to disk or over the wire:
 
 - Docs live in `/docs`.
 - Decision records live in `/docs/decisions`
-- Use the template in `/docs/docs/YYYY-MM-DD-template.md` for new decisions
+- Use the template in `/docs/decisions/YYYY-MM-DD-template.md` for new decisions
 
 ## Planning
 
@@ -211,6 +211,32 @@ When modifying any struct that is serialized to disk or over the wire:
 - Use issue relationships to communicate if work is blocked by another issue
 - Write the minimal description possible in an issue to convey the point
 - Communicate the background (if any) and what work the issue is tracking
+
+## Worktrees
+
+- Store worktrees under the sibling `query.worktrees/` directory.
+- Use one descriptive subdirectory per project or task, and perform project work
+  from that worktree.
+
+## Local project artifacts
+
+- Store uncommitted artifacts that must persist across sessions or agent
+  handoffs under `<primary-repository-root>/.tmp/projects/<project-key>/`.
+- Use an absolute artifact path when delegating work from another worktree.
+- Keep source inspection, source edits, Git operations, and validation in the
+  assigned worktree. Use `.tmp/` only for supporting artifacts such as plans,
+  research, handoffs, validation logs, and generated pull request bodies.
+- Give each concurrent agent an exclusive subdirectory under
+  `.tmp/projects/<project-key>/agents/`. Agents must not edit another lane's
+  artifacts.
+- Keep GitHub issues, Project fields, checkpoints, pull requests, and tracked
+  repository files as the durable source of truth. Promote any state needed to
+  resume on another machine to GitHub before ending a session.
+- Never persist credentials, tokens, environment secrets, or unnecessary
+  sensitive output in `.tmp/`.
+- Remove only a specific, resolved project artifact directory after its work
+  has been integrated or abandoned and its essential state has been promoted.
+  Never prune `.tmp/` with globs or age-based cleanup.
 
 ## Self improvement
 
