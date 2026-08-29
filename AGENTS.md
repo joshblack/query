@@ -201,7 +201,7 @@ When modifying any struct that is serialized to disk or over the wire:
 
 - Docs live in `/docs`.
 - Decision records live in `/docs/decisions`
-- Use the template in `/docs/docs/YYYY-MM-DD-template.md` for new decisions
+- Use the template in `/docs/decisions/YYYY-MM-DD-template.md` for new decisions
 
 ## Planning
 
@@ -211,6 +211,42 @@ When modifying any struct that is serialized to disk or over the wire:
 - Use issue relationships to communicate if work is blocked by another issue
 - Write the minimal description possible in an issue to convey the point
 - Communicate the background (if any) and what work the issue is tracking
+
+## Worktrees
+
+- Store worktrees under the sibling `query.worktrees/` directory.
+- Use one descriptive subdirectory per project or task, and perform project work
+  from that worktree.
+
+## Temporary project artifacts
+
+- Use the `tmp` skill whenever a task needs temporary plans, research, handoffs,
+  validation logs, generated pull request bodies, or other untracked artifacts.
+- Store these artifacts under
+  `<primary-repository-root>/.agents/tmp/projects/<project-key>/`, following the
+  tmp skill's `.agents/tmp` convention.
+- Use an absolute artifact path when delegating work from another worktree.
+- Keep source inspection, source edits, Git operations, and validation in the
+  assigned worktree. Use `.agents/tmp/` only for temporary supporting
+  artifacts.
+- Give each concurrent agent an exclusive subdirectory under
+  `.agents/tmp/projects/<project-key>/agents/`. Agents must not edit another
+  lane's artifacts.
+- Keep GitHub issues, Project fields, checkpoints, pull requests, and tracked
+  repository files as the durable source of truth. Promote any state needed to
+  resume on another machine before the temporary artifact is removed.
+- Never persist credentials, tokens, environment secrets, or unnecessary
+  sensitive output in `.agents/tmp/`.
+- Clean up each lane's temporary artifacts as soon as its handoff has been
+  consumed, required evidence has been reviewed, and essential state has been
+  promoted. Clean up generated pull request bodies after confirming GitHub has
+  the current body.
+- Before ending a task, inspect the exact project artifact directory and remove
+  files and empty directories that are no longer needed. Retain only artifacts
+  that an active lane, pending integration, or recovery action still requires,
+  and record why they remain.
+- Remove only specific, resolved paths. Never delete the `.agents/tmp/` root,
+  use globs for cleanup, or use age-based pruning.
 
 ## Self improvement
 
