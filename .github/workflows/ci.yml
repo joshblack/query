@@ -18,6 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: jdx/mise-action@v5.2.9
+        with:
+          cache_key: "{{default}}-${{ github.job }}"
       - run: cargo fmt --check
 
   lint:
@@ -25,6 +27,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: jdx/mise-action@v5.2.9
+        with:
+          cache_key: "{{default}}-${{ github.job }}"
       - run: cargo clippy --all-targets -- -D warnings
 
   test:
@@ -32,4 +36,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: jdx/mise-action@v5.2.9
+        with:
+          cache_key: "{{default}}-${{ github.job }}"
       - run: cargo nextest run
