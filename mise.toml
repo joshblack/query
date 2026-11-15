@@ -1,5 +1,6 @@
 [settings]
 idiomatic_version_file_enable_tools = ["rust"]
+cargo.binstall_only = true
 
 [wrappers.cargo]
 command = "mbx"
@@ -8,6 +9,7 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 [tools]
 "npm:npm" = "12"
 mr-boxington = { version = "latest", postinstall = "mbx setup --yes" }
+cargo-binstall = "1.27.0"
 "cargo:cargo-nextest" = { version = "0.9.149", lazy = true, lazy_bins = ["cargo-nextest"] }
 
 [tasks.fmt]
