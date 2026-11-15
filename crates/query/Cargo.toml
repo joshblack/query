@@ -1,0 +1,18 @@
+[package]
+name = "query"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+line-index = "0.1.2"
+oxc_allocator = "0.158.0"
+oxc_ast = "0.158.0"
+oxc_ast_visit = "0.158.0"
+oxc_diagnostics = "0.158.0"
+oxc_parser = "0.158.0"
+oxc_semantic = "0.158.0"
+oxc_span = "0.158.0"
+thiserror = "2.0.21"
+# anyhow = "1.0.104"
+# petgraph = "0.8.3"
+# serde = { version = "1.0.229", features = ["derive"] }
