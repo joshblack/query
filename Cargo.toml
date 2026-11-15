@@ -1,0 +1,6 @@
+[workspace]
+members = [
+  "crates/query",
+  "crates/query-cli",
+]
+resolver = "3"

@@ -1,0 +1,21 @@
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
+
+[wrappers.cargo]
+command = "mbx"
+env = { MBX_CARGO_SHIM_MODE = "1" }
+
+[tools]
+"npm:npm" = "12"
+mr-boxington = { version = "latest", postinstall = "mbx setup --yes" }
+"cargo:cargo-nextest" = { version = "0.9.149", lazy = true, lazy_bins = ["cargo-nextest"] }
+
+[tasks.fmt]
+run = "cargo fmt --all --check"
+
+[tasks.lint]
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+run = "cargo nextest run --workspace --no-fail-fast"
+
