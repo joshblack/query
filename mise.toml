@@ -8,7 +8,7 @@ env = { MBX_CARGO_SHIM_MODE = "1" }
 [tools]
 "npm:npm" = "12"
 mr-boxington = { version = "latest", postinstall = "mbx setup --yes" }
-"cargo:cargo-nextest" = { version = "0.9.149", lazy = true, lazy_bins = ["cargo-nextest"] }
+"cargo:cargo-nextest" = { version = "0.9.149", lazy = true }
 
 [tasks.fmt]
 run = "cargo fmt --all --check"
