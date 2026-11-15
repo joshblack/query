@@ -38,4 +38,5 @@ jobs:
       - uses: jdx/mise-action@v5.2.9
         with:
           cache_key: "{{default}}-${{ github.job }}"
+          install_args: "rust mr-boxington cargo:cargo-nextest"
       - run: cargo nextest run
