@@ -4,7 +4,7 @@ use std::collections::{HashMap, hash_map::Entry};
 
 use line_index::LineIndex;
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{BindingPattern, Declaration};
+use oxc_ast::ast::{BindingPattern, Declaration, ImportDeclarationSpecifier};
 use oxc_ast_visit::Visit;
 use oxc_diagnostics::Diagnostics;
 use oxc_parser::Parser;
@@ -44,6 +44,7 @@ pub enum ParseError {
 pub struct Visitor {
     errors: Vec<VisitError>,
     pub exports: HashMap<ExportKey, Export>,
+    pub imports: Vec<Import>,
     line_index: LineIndex,
     pending_exports: Vec<PendingExport>,
 }
@@ -53,6 +54,7 @@ impl Visitor {
         Self {
             errors: Default::default(),
             exports: Default::default(),
+            imports: Default::default(),
             line_index: LineIndex::new(source),
             pending_exports: Default::default(),
         }
@@ -228,6 +230,57 @@ impl<'a> Visit<'a> for Visitor {
             }));
         }
     }
+
+    fn visit_import_declaration(&mut self, declaration: &oxc_ast::ast::ImportDeclaration<'a>) {
+        let Some(source) = &declaration.source.value.as_str() else {
+            self.errors
+                .push(VisitError::InvalidSource(Span::from_oxc_span(
+                    &self.line_index,
+                    declaration.source.span,
+                )));
+            return;
+        };
+
+        for specifier in declaration.specifiers.iter().flatten() {
+            match specifier {
+                ImportDeclarationSpecifier::ImportSpecifier(import_specifier) => {
+                    self.imports.push(Import::Named(NamedImport {
+                        import_kind: match declaration.import_kind {
+                            oxc_ast::ast::ImportOrExportKind::Type => ImportOrExportKind::Type,
+                            oxc_ast::ast::ImportOrExportKind::Value => {
+                                import_specifier.import_kind.into()
+                            }
+                        },
+                        imported: import_specifier.imported.name().to_string(),
+                        local: import_specifier.local.name.to_string(),
+                        span: Span::from_oxc_span(&self.line_index, import_specifier.span),
+                        source: source.to_string(),
+                    }));
+                }
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(import_default_specifier) => {
+                    self.imports.push(Import::Default(DefaultImport {
+                        import_kind: declaration.import_kind.into(),
+                        local: import_default_specifier.local.name.to_string(),
+                        span: Span::from_oxc_span(&self.line_index, import_default_specifier.span),
+                        source: source.to_string(),
+                    }));
+                }
+                ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                    import_namespace_specifier,
+                ) => {
+                    self.imports.push(Import::Namespace(NamespaceImport {
+                        import_kind: declaration.import_kind.into(),
+                        local: import_namespace_specifier.local.name.to_string(),
+                        span: Span::from_oxc_span(
+                            &self.line_index,
+                            import_namespace_specifier.span,
+                        ),
+                        source: source.to_string(),
+                    }));
+                }
+            }
+        }
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -252,6 +305,38 @@ impl From<oxc_ast::ast::ImportOrExportKind> for ImportOrExportKind {
             oxc_ast::ast::ImportOrExportKind::Value => ImportOrExportKind::Value,
         }
     }
+}
+
+#[derive(Debug)]
+pub enum Import {
+    Default(DefaultImport),
+    Named(NamedImport),
+    Namespace(NamespaceImport),
+}
+
+#[derive(Debug)]
+pub struct DefaultImport {
+    pub import_kind: ImportOrExportKind,
+    pub local: String,
+    pub source: String,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct NamedImport {
+    pub import_kind: ImportOrExportKind,
+    pub imported: String,
+    pub local: String,
+    pub source: String,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct NamespaceImport {
+    pub import_kind: ImportOrExportKind,
+    pub local: String,
+    pub source: String,
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -649,5 +734,149 @@ mod tests {
             &result.errors[0],
             VisitError::DuplicateExport((binding, _)) if binding == "t1"
         );
+    }
+
+    #[test]
+    fn test_import_default() {
+        let allocator = Allocator::default();
+        let source = r#"
+            import t1 from 'mod';
+            import type t2 from 'mod';
+        "#;
+        let source_type = SourceType::ts();
+        let result = parse(&allocator, source, source_type).unwrap();
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(default_import) => {
+                    default_import.local == "t1"
+                        && default_import.source == "mod"
+                        && default_import.import_kind == ImportOrExportKind::Value
+                }
+                _ => false,
+            }
+        }));
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(default_import) => {
+                    default_import.local == "t2"
+                        && default_import.source == "mod"
+                        && default_import.import_kind == ImportOrExportKind::Type
+                }
+                _ => false,
+            }
+        }));
+    }
+
+    #[test]
+    fn test_import_named() {
+        let allocator = Allocator::default();
+        let source = r#"
+            import { t1, t2 } from 'mod';
+            import type { t3 } from 'mod';
+            import { t1 as t4 } from 'mod';
+            import { type t5 } from 'mod';
+        "#;
+        let source_type = SourceType::ts();
+        let result = parse(&allocator, source, source_type).unwrap();
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(_) => false,
+                Import::Named(named_import) => {
+                    named_import.imported == "t1"
+                        && named_import.local == "t1"
+                        && named_import.source == "mod"
+                        && named_import.import_kind == ImportOrExportKind::Value
+                }
+                Import::Namespace(_) => false,
+            }
+        }));
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(_) => false,
+                Import::Named(named_import) => {
+                    named_import.imported == "t2"
+                        && named_import.local == "t2"
+                        && named_import.source == "mod"
+                        && named_import.import_kind == ImportOrExportKind::Value
+                }
+                Import::Namespace(_) => false,
+            }
+        }));
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(_) => false,
+                Import::Named(named_import) => {
+                    named_import.imported == "t3"
+                        && named_import.local == "t3"
+                        && named_import.source == "mod"
+                        && named_import.import_kind == ImportOrExportKind::Type
+                }
+                Import::Namespace(_) => false,
+            }
+        }));
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(_) => false,
+                Import::Named(named_import) => {
+                    named_import.imported == "t1"
+                        && named_import.local == "t4"
+                        && named_import.source == "mod"
+                        && named_import.import_kind == ImportOrExportKind::Value
+                }
+                Import::Namespace(_) => false,
+            }
+        }));
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(_) => false,
+                Import::Named(named_import) => {
+                    named_import.imported == "t5"
+                        && named_import.local == "t5"
+                        && named_import.source == "mod"
+                        && named_import.import_kind == ImportOrExportKind::Type
+                }
+                Import::Namespace(_) => false,
+            }
+        }));
+    }
+
+    #[test]
+    fn test_import_namespace() {
+        let allocator = Allocator::default();
+        let source = r#"
+            import * as ns from 'mod';
+            import type * as ns2 from 'mod';
+        "#;
+        let source_type = SourceType::ts();
+        let result = parse(&allocator, source, source_type).unwrap();
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Namespace(namespace_import) => {
+                    namespace_import.local == "ns"
+                        && namespace_import.source == "mod"
+                        && namespace_import.import_kind == ImportOrExportKind::Value
+                }
+                _ => false,
+            }
+        }));
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Namespace(namespace_import) => {
+                    namespace_import.local == "ns2"
+                        && namespace_import.source == "mod"
+                        && namespace_import.import_kind == ImportOrExportKind::Type
+                }
+                _ => false,
+            }
+        }));
     }
 }
