@@ -1,4 +1,4 @@
-name: ci
+name: actions
 on:
   merge_group:
     branches:
