@@ -25,10 +25,22 @@ enum ParseAction {
         #[command(subcommand)]
         action: ExportsAction,
     },
+    Imports {
+        #[command(subcommand)]
+        action: ImportsAction,
+    },
 }
 
 #[derive(Subcommand)]
 enum ExportsAction {
+    List {
+        /// The path to the file
+        path: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum ImportsAction {
     List {
         /// The path to the file
         path: PathBuf,
@@ -79,6 +91,54 @@ pub fn run() -> Result<(), Error> {
                             .collect::<Vec<_>>()
                             .table()
                             .title(vec!["Export".cell(), "Export kind".cell(), "Line".cell()]);
+
+                        print_stdout(table)?;
+
+                        Ok(())
+                    }
+                },
+                ParseAction::Imports { action } => match action {
+                    ImportsAction::List { path } => {
+                        let imports = query::list_imports(path)?;
+                        let table = imports
+                            .iter()
+                            .map(|import| match import {
+                                query::Import::Default(default_import) => vec![
+                                    "default".cell(),
+                                    match &default_import.import_kind {
+                                        query::ImportOrExportKind::Value => "value".cell(),
+                                        query::ImportOrExportKind::Type => "type".cell(),
+                                    },
+                                    default_import.source.clone().cell(),
+                                    default_import.span.start.line.to_string().cell(),
+                                ],
+                                query::Import::Named(named_import) => vec![
+                                    named_import.imported.clone().cell(),
+                                    match &named_import.import_kind {
+                                        query::ImportOrExportKind::Value => "value".cell(),
+                                        query::ImportOrExportKind::Type => "type".cell(),
+                                    },
+                                    named_import.source.clone().cell(),
+                                    named_import.span.start.line.to_string().cell(),
+                                ],
+                                query::Import::Namespace(namespace_import) => vec![
+                                    "*".cell(),
+                                    match &namespace_import.import_kind {
+                                        query::ImportOrExportKind::Value => "value".cell(),
+                                        query::ImportOrExportKind::Type => "type".cell(),
+                                    },
+                                    namespace_import.source.clone().cell(),
+                                    namespace_import.span.start.line.to_string().cell(),
+                                ],
+                            })
+                            .collect::<Vec<_>>()
+                            .table()
+                            .title(vec![
+                                "Imported".cell(),
+                                "Kind".cell(),
+                                "Source".cell(),
+                                "Line".cell(),
+                            ]);
 
                         print_stdout(table)?;
 

@@ -44,7 +44,7 @@ pub enum ParseError {
 pub struct Visitor {
     errors: Vec<VisitError>,
     pub exports: HashMap<ExportKey, Export>,
-    imports: Vec<Import>,
+    pub imports: Vec<Import>,
     line_index: LineIndex,
     pending_exports: Vec<PendingExport>,
 }
@@ -268,6 +268,7 @@ impl<'a> Visit<'a> for Visitor {
                     import_namespace_specifier,
                 ) => {
                     self.imports.push(Import::Namespace(NamespaceImport {
+                        import_kind: declaration.import_kind.into(),
                         local: import_namespace_specifier.local.name.to_string(),
                         span: Span::from_oxc_span(
                             &self.line_index,
@@ -306,33 +307,34 @@ impl From<oxc_ast::ast::ImportOrExportKind> for ImportOrExportKind {
 }
 
 #[derive(Debug)]
-enum Import {
+pub enum Import {
     Default(DefaultImport),
     Named(NamedImport),
     Namespace(NamespaceImport),
 }
 
 #[derive(Debug)]
-struct DefaultImport {
-    import_kind: ImportOrExportKind,
-    source: String,
-    span: Span,
+pub struct DefaultImport {
+    pub import_kind: ImportOrExportKind,
+    pub source: String,
+    pub span: Span,
 }
 
 #[derive(Debug)]
-struct NamedImport {
-    import_kind: ImportOrExportKind,
-    imported: String,
-    local: String,
-    source: String,
-    span: Span,
+pub struct NamedImport {
+    pub import_kind: ImportOrExportKind,
+    pub imported: String,
+    pub local: String,
+    pub source: String,
+    pub span: Span,
 }
 
 #[derive(Debug)]
-struct NamespaceImport {
-    local: String,
-    source: String,
-    span: Span,
+pub struct NamespaceImport {
+    pub import_kind: ImportOrExportKind,
+    pub local: String,
+    pub source: String,
+    pub span: Span,
 }
 
 #[derive(Debug)]
@@ -839,7 +841,9 @@ mod tests {
         assert!(result.imports.iter().any(|import| {
             match import {
                 Import::Namespace(namespace_import) => {
-                    namespace_import.local == "ns" && namespace_import.source == "mod"
+                    namespace_import.local == "ns"
+                        && namespace_import.source == "mod"
+                        && namespace_import.import_kind == ImportOrExportKind::Value
                 }
                 _ => false,
             }
@@ -848,7 +852,9 @@ mod tests {
         assert!(result.imports.iter().any(|import| {
             match import {
                 Import::Namespace(namespace_import) => {
-                    namespace_import.local == "ns2" && namespace_import.source == "mod"
+                    namespace_import.local == "ns2"
+                        && namespace_import.source == "mod"
+                        && namespace_import.import_kind == ImportOrExportKind::Type
                 }
                 _ => false,
             }
