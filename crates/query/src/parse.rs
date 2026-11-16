@@ -260,6 +260,7 @@ impl<'a> Visit<'a> for Visitor {
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(import_default_specifier) => {
                     self.imports.push(Import::Default(DefaultImport {
                         import_kind: declaration.import_kind.into(),
+                        local: import_default_specifier.local.name.to_string(),
                         span: Span::from_oxc_span(&self.line_index, import_default_specifier.span),
                         source: source.to_string(),
                     }));
@@ -316,6 +317,7 @@ pub enum Import {
 #[derive(Debug)]
 pub struct DefaultImport {
     pub import_kind: ImportOrExportKind,
+    pub local: String,
     pub source: String,
     pub span: Span,
 }
@@ -738,16 +740,33 @@ mod tests {
     fn test_import_default() {
         let allocator = Allocator::default();
         let source = r#"
-            import t from "module-name";
+            import t1 from 'mod';
+            import type t2 from 'mod';
         "#;
         let source_type = SourceType::ts();
         let result = parse(&allocator, source, source_type).unwrap();
 
-        assert_eq!(result.imports.len(), 1);
-        assert_matches!(
-            &result.imports[0],
-            Import::Default(DefaultImport { source, .. }) if source == "module-name"
-        );
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(default_import) => {
+                    default_import.local == "t1"
+                        && default_import.source == "mod"
+                        && default_import.import_kind == ImportOrExportKind::Value
+                }
+                _ => false,
+            }
+        }));
+
+        assert!(result.imports.iter().any(|import| {
+            match import {
+                Import::Default(default_import) => {
+                    default_import.local == "t2"
+                        && default_import.source == "mod"
+                        && default_import.import_kind == ImportOrExportKind::Type
+                }
+                _ => false,
+            }
+        }));
     }
 
     #[test]
