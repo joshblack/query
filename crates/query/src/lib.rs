@@ -3,8 +3,10 @@ use std::path::Path;
 use oxc_span::{SourceType, UnknownExtension};
 use parse::parse;
 pub use parse::{Export, Import, ImportOrExportKind, ParseError};
+pub use project::Project;
 
 mod parse;
+pub mod project;
 
 #[derive(thiserror::Error, Debug)]
 pub enum ExportsError {
