@@ -399,7 +399,7 @@ mod tests {
         let tempdir = tempfile::tempdir()?;
         let directory = tempdir.path().to_path_buf();
 
-        std::fs::write(&directory.join("package.json"), r#"{}"#)?;
+        std::fs::write(directory.join("package.json"), r#"{}"#)?;
 
         let project = Project::new(vec![&directory])?;
 
@@ -418,11 +418,11 @@ mod tests {
         let tempdir = tempfile::tempdir()?;
         let directory = tempdir.path().to_path_buf();
 
-        std::fs::write(&directory.join("package.json"), r#"{}"#)?;
+        std::fs::write(directory.join("package.json"), r#"{}"#)?;
 
         let test_package_directory = directory.join("packages").join("test");
         std::fs::create_dir_all(&test_package_directory)?;
-        std::fs::write(&test_package_directory.join("package.json"), r#"{}"#)?;
+        std::fs::write(test_package_directory.join("package.json"), r#"{}"#)?;
 
         let project = Project::new(vec![&directory])?;
 
@@ -448,13 +448,13 @@ mod tests {
         let directory = tempdir.path().to_path_buf();
 
         std::fs::write(
-            &directory.join("package.json"),
+            directory.join("package.json"),
             r#"{"workspaces": ["packages/*"]}"#,
         )?;
 
         let test_package_directory = directory.join("packages").join("test");
         std::fs::create_dir_all(&test_package_directory)?;
-        std::fs::write(&test_package_directory.join("package.json"), r#"{}"#)?;
+        std::fs::write(test_package_directory.join("package.json"), r#"{}"#)?;
 
         let project = Project::new(vec![&directory])?;
         let root_workspace_id = project
@@ -492,8 +492,8 @@ mod tests {
         let module_b_path = directory.join("src").join("b.ts");
         let module_c_path = directory.join("src").join("nested").join("c.tsx");
 
-        std::fs::create_dir_all(&module_c_path.parent().expect("Parent to be defined"))?;
-        std::fs::write(&directory.join("package.json"), "{}")?;
+        std::fs::create_dir_all(module_c_path.parent().expect("Parent to be defined"))?;
+        std::fs::write(directory.join("package.json"), "{}")?;
         std::fs::write(&module_a_path, "")?;
         std::fs::write(&module_b_path, "")?;
         std::fs::write(&module_c_path, "")?;
@@ -519,7 +519,7 @@ mod tests {
             .graph
             .workspace_modules(&workspace_id)
             .collect::<Vec<_>>();
-        let module_ids = vec![module_a_id, module_b_id, module_c_id];
+        let module_ids = [module_a_id, module_b_id, module_c_id];
 
         assert!(
             module_ids
