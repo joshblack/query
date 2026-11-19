@@ -11,7 +11,6 @@ use petgraph::{
 
 pub struct Project {
     pub graph: Graph,
-    pub sources: HashSet<PathBuf>,
 }
 
 impl Project {
@@ -30,7 +29,7 @@ impl Project {
 
         let mut types_builder = TypesBuilder::new();
         types_builder.add("source", "package.json")?;
-        // types_builder.add("source", "*.{js,cjs,mjs,ts,tsx,cts,mts}")?;
+        types_builder.add("source", "*.{js,cjs,mjs,ts,tsx,cts,mts}")?;
         types_builder.add("declaration", "*.d.ts")?;
         types_builder.select("source");
         types_builder.negate("declaration");
@@ -41,8 +40,10 @@ impl Project {
             let walker = WalkBuilder::new(source)
                 .types(types.clone())
                 .filter_entry(|entry| {
-                    !(entry.file_name() == "node_modules"
-                        && entry.file_type().is_some_and(|ty| ty.is_dir()))
+                    let ignored = ["node_modules", "dist", "lib", "lib-esm"];
+                    let is_dir = entry.file_type().is_some_and(|ty| ty.is_dir());
+
+                    !(is_dir && ignored.iter().any(|name| entry.file_name() == *name))
                 })
                 .build();
 
@@ -58,16 +59,24 @@ impl Project {
             })
         });
 
-        let workspaces = files
-            .filter_map(|file: (PathBuf, SourceId)| {
-                let directory = file.0.parent()?.to_path_buf();
+        let mut workspaces = BTreeMap::<PathBuf, WorkspaceId>::new();
+        let mut modules = HashSet::<PathBuf>::new();
+
+        for (path, source_id) in files {
+            if path.file_name() == Some(std::ffi::OsStr::new("package.json")) {
+                let Some(directory) = path.parent() else {
+                    continue;
+                };
+                let directory = directory.to_path_buf();
                 let workspace = Workspace {
                     path: directory.clone(),
                 };
-                let workspace_id = graph.insert_workspace(&file.1, workspace);
-                Some((directory, workspace_id))
-            })
-            .collect::<BTreeMap<PathBuf, WorkspaceId>>();
+                let workspace_id = graph.insert_workspace(&source_id, workspace);
+                workspaces.insert(directory, workspace_id);
+            } else {
+                modules.insert(path);
+            }
+        }
 
         for workspace_id in workspaces.values() {
             let workspace = graph.workspace(workspace_id);
@@ -106,10 +115,21 @@ impl Project {
             }
         }
 
-        Ok(Self {
-            graph,
-            sources: sources.into_keys().collect::<HashSet<_>>(),
-        })
+        for module_path in modules {
+            let workspace_id = module_path
+                .ancestors()
+                .skip(1)
+                .find_map(|dir| workspaces.get(dir));
+            let module = Module { path: module_path };
+
+            if let Some(workspace_id) = workspace_id {
+                graph.insert_workspace_module(workspace_id, module);
+            } else {
+                graph.insert_module(module);
+            }
+        }
+
+        Ok(Self { graph })
     }
 }
 
@@ -139,7 +159,56 @@ impl Graph {
         }
     }
 
+    // Module ------------------------------------------------------------------
+
+    pub fn modules(&self) -> impl Iterator<Item = ModuleId> {
+        self.graph.node_indices().filter_map(|node_index| {
+            let Node::Module(_) = &self.graph[node_index] else {
+                return None;
+            };
+            Some(ModuleId(node_index))
+        })
+    }
+
+    pub fn module(&self, module_id: &ModuleId) -> &Module {
+        let Node::Module(module) = &self.graph[module_id.0] else {
+            unreachable!("A Module node must exist for any given ModuleId")
+        };
+        module
+    }
+
+    pub fn find_module_by_path<P: AsRef<Path>>(&self, path: P) -> Option<ModuleId> {
+        let path = path.as_ref();
+        self.graph.node_indices().find_map(|node_index| {
+            let Node::Module(module) = &self.graph[node_index] else {
+                return None;
+            };
+            if module.path == path {
+                Some(ModuleId(node_index))
+            } else {
+                None
+            }
+        })
+    }
+
+    fn insert_module(&mut self, module: Module) -> ModuleId {
+        let node = Node::Module(module);
+        ModuleId(self.graph.add_node(node))
+    }
+
+    pub fn module_workspace(&self, module_id: &ModuleId) -> Option<WorkspaceId> {
+        self.graph
+            .neighbors_directed(module_id.0, petgraph::Direction::Incoming)
+            .find_map(|workspace_index| {
+                let Node::Workspace(_) = &self.graph[workspace_index] else {
+                    return None;
+                };
+                Some(WorkspaceId(workspace_index))
+            })
+    }
+
     // Source ------------------------------------------------------------------
+
     pub fn sources(&self) -> impl Iterator<Item = SourceId> {
         self.graph.node_indices().filter_map(|node_index| {
             let Node::Source(_) = &self.graph[node_index] else {
@@ -172,6 +241,7 @@ impl Graph {
     }
 
     // Workspace ---------------------------------------------------------------
+
     pub fn workspaces(&self) -> impl Iterator<Item = WorkspaceId> {
         self.graph.node_indices().filter_map(|node_index| {
             let Node::Workspace(_) = &self.graph[node_index] else {
@@ -188,7 +258,7 @@ impl Graph {
         workspace
     }
 
-    pub fn find_workspace_by_directory<P: AsRef<Path>>(&self, directory: P) -> Option<WorkspaceId> {
+    pub fn find_workspace_by_path<P: AsRef<Path>>(&self, directory: P) -> Option<WorkspaceId> {
         let directory = directory.as_ref();
         self.graph.node_indices().find_map(|node_index| {
             let Node::Workspace(workspace) = &self.graph[node_index] else {
@@ -202,7 +272,43 @@ impl Graph {
         })
     }
 
-    // Workspace -> Workspace --------------------------------------------------
+    // Workspace -[Module]-> Module --------------------------------------------
+
+    pub fn workspace_modules(&self, workspace_id: &WorkspaceId) -> impl Iterator<Item = ModuleId> {
+        self.graph
+            .neighbors_directed(workspace_id.0, petgraph::Direction::Outgoing)
+            .filter_map(|module_index| {
+                let Node::Module(_) = &self.graph[module_index] else {
+                    return None;
+                };
+                Some(ModuleId(module_index))
+            })
+    }
+
+    fn insert_workspace_module(&mut self, workspace_id: &WorkspaceId, module: Module) -> ModuleId {
+        let module_id = self.insert_module(module);
+
+        self.graph
+            .add_edge(workspace_id.0, module_id.0, Edge::Module);
+
+        module_id
+    }
+
+    // Workspace -[Source]-> Source --------------------------------------------
+
+    pub fn workspace_source(&self, workspace_id: &WorkspaceId) -> SourceId {
+        self.graph
+            .neighbors_directed(workspace_id.0, petgraph::Direction::Incoming)
+            .find_map(|source_index| {
+                let Node::Source(_) = &self.graph[source_index] else {
+                    return None;
+                };
+                Some(SourceId(source_index))
+            })
+            .expect("A Source node must exist for any given WorkspaceId")
+    }
+
+    // Workspace -[ChildWorkspace]-> Workspace ---------------------------------
 
     pub fn workspace_parent(&self, workspace_id: &WorkspaceId) -> Option<WorkspaceId> {
         self.graph
@@ -232,30 +338,20 @@ impl Graph {
     fn insert_workspace_child(&mut self, parent: &WorkspaceId, child: &WorkspaceId) {
         self.graph.add_edge(parent.0, child.0, Edge::ChildWorkspace);
     }
-
-    // Workspace -> Source -----------------------------------------------------
-
-    pub fn workspace_source(&self, workspace_id: &WorkspaceId) -> SourceId {
-        self.graph
-            .neighbors_directed(workspace_id.0, petgraph::Direction::Incoming)
-            .find_map(|source_index| {
-                let Node::Source(_) = &self.graph[source_index] else {
-                    return None;
-                };
-                Some(SourceId(source_index))
-            })
-            .expect("A Source node must exist for any given WorkspaceId")
-    }
 }
 
 enum Node {
-    // Module(Module),
+    Module(Module),
     Source(Source),
     Workspace(Workspace),
 }
 
 enum Edge {
+    /// A directed edge from a Workspace to one of its child Workspaces
     ChildWorkspace,
+    /// A directed edge from a Workspace to one of its Modules
+    Module,
+    /// A directed edge from a Workspace to the Source that contains it
     Source,
 }
 
@@ -285,12 +381,12 @@ struct PackageJson {
     workspaces: Vec<String>,
 }
 
-// #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-// pub struct ModuleId(NodeIndex);
-//
-// pub struct Module {
-//     pub path: PathBuf,
-// }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ModuleId(NodeIndex);
+
+pub struct Module {
+    pub path: PathBuf,
+}
 
 #[cfg(test)]
 mod tests {
@@ -307,7 +403,12 @@ mod tests {
 
         let project = Project::new(vec![&directory])?;
 
-        assert!(project.graph.workspaces().any(|ws| ws.path == directory));
+        assert!(
+            project
+                .graph
+                .workspaces()
+                .any(|id| project.graph.workspace(&id).path == directory)
+        );
 
         Ok(())
     }
@@ -325,12 +426,17 @@ mod tests {
 
         let project = Project::new(vec![&directory])?;
 
-        assert!(project.graph.workspaces().any(|ws| ws.path == directory));
         assert!(
             project
                 .graph
                 .workspaces()
-                .any(|ws| ws.path == test_package_directory)
+                .any(|id| project.graph.workspace(&id).path == directory)
+        );
+        assert!(
+            project
+                .graph
+                .workspaces()
+                .any(|id| project.graph.workspace(&id).path == test_package_directory)
         );
 
         Ok(())
@@ -353,11 +459,11 @@ mod tests {
         let project = Project::new(vec![&directory])?;
         let root_workspace_id = project
             .graph
-            .find_workspace_by_directory(&directory)
+            .find_workspace_by_path(&directory)
             .expect("Root workspace should exist");
         let test_workspace_id = project
             .graph
-            .find_workspace_by_directory(&test_package_directory)
+            .find_workspace_by_path(&test_package_directory)
             .expect("Test workspace should exist");
 
         assert!(
@@ -373,6 +479,52 @@ mod tests {
                 .workspace_parent(&test_workspace_id)
                 .map(|ws_id| ws_id == root_workspace_id)
                 .unwrap_or(false)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_modules() -> Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let directory = tempdir.path().to_path_buf();
+        let module_a_path = directory.join("a.js");
+        let module_b_path = directory.join("src").join("b.ts");
+        let module_c_path = directory.join("src").join("nested").join("c.tsx");
+
+        std::fs::create_dir_all(&module_c_path.parent().expect("Parent to be defined"))?;
+        std::fs::write(&directory.join("package.json"), "{}")?;
+        std::fs::write(&module_a_path, "")?;
+        std::fs::write(&module_b_path, "")?;
+        std::fs::write(&module_c_path, "")?;
+
+        let project = Project::new(vec![&directory])?;
+        let workspace_id = project
+            .graph
+            .find_workspace_by_path(&directory)
+            .expect("Workspace should exist");
+        let module_a_id = project
+            .graph
+            .find_module_by_path(&module_a_path)
+            .expect("Module A should exist");
+        let module_b_id = project
+            .graph
+            .find_module_by_path(&module_b_path)
+            .expect("Module B should exist");
+        let module_c_id = project
+            .graph
+            .find_module_by_path(&module_c_path)
+            .expect("Module C should exist");
+        let workspace_module_ids = project
+            .graph
+            .workspace_modules(&workspace_id)
+            .collect::<Vec<_>>();
+        let module_ids = vec![module_a_id, module_b_id, module_c_id];
+
+        assert!(
+            module_ids
+                .iter()
+                .all(|module_id| workspace_module_ids.contains(module_id))
         );
 
         Ok(())

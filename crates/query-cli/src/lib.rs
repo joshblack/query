@@ -13,11 +13,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    Parse {
-        #[command(subcommand)]
-        command: ParseCommand,
-    },
-    Workspaces(WorkspacesArgs),
+    Parse(ParseArgs),
+    Workspace(WorkspaceArgs),
+}
+
+#[derive(clap::Args)]
+struct ParseArgs {
+    #[command(subcommand)]
+    command: ParseCommand,
 }
 
 #[derive(Subcommand)]
@@ -49,7 +52,7 @@ enum ImportsAction {
 }
 
 #[derive(clap::Args)]
-struct WorkspacesArgs {
+struct WorkspaceArgs {
     #[command(subcommand)]
     command: WorkspaceCommand,
 }
@@ -58,6 +61,28 @@ struct WorkspacesArgs {
 enum WorkspaceCommand {
     /// List the workspaces in the project
     List {
+        #[arg(long)]
+        page: Option<usize>,
+
+        #[arg(long)]
+        per_page: Option<usize>,
+    },
+    Module(WorkspaceModuleArgs),
+}
+
+#[derive(clap::Args)]
+struct WorkspaceModuleArgs {
+    #[command(subcommand)]
+    command: WorkspaceModuleCommand,
+}
+
+#[derive(Subcommand)]
+enum WorkspaceModuleCommand {
+    /// List the modules in the workspace
+    List {
+        /// The path to the workspace
+        path: PathBuf,
+
         #[arg(long)]
         page: Option<usize>,
 
@@ -76,6 +101,9 @@ pub enum Error {
 
     #[error("Failed to create project: {0}")]
     CreateProject(#[from] query::project::Error),
+
+    #[error("Failed to find workspace by path: {0}")]
+    WorkspaceNotFound(PathBuf),
 }
 
 pub fn run() -> Result<(), Error> {
@@ -83,15 +111,15 @@ pub fn run() -> Result<(), Error> {
 
     match cli.command {
         Some(command) => match command {
-            Command::Parse { command: action } => run_parse_command(action),
-            Command::Workspaces(workspaces_args) => run_workspaces_args(workspaces_args),
+            Command::Parse(parse_args) => run_parse_args(parse_args),
+            Command::Workspace(workspaces_args) => run_workspace_args(workspaces_args),
         },
         None => Ok(()),
     }
 }
 
-fn run_parse_command(action: ParseCommand) -> Result<(), Error> {
-    match action {
+fn run_parse_args(args: ParseArgs) -> Result<(), Error> {
+    match args.command {
         ParseCommand::Exports {
             action: export_action,
         } => match export_action {
@@ -176,7 +204,7 @@ fn run_parse_command(action: ParseCommand) -> Result<(), Error> {
     }
 }
 
-fn run_workspaces_args(args: WorkspacesArgs) -> Result<(), Error> {
+fn run_workspace_args(args: WorkspaceArgs) -> Result<(), Error> {
     match args.command {
         WorkspaceCommand::List { page, per_page } => {
             let directory = std::env::current_dir()?;
@@ -216,6 +244,63 @@ fn run_workspaces_args(args: WorkspacesArgs) -> Result<(), Error> {
                 .collect::<Vec<_>>()
                 .table()
                 .title(vec!["Directory".cell()]);
+
+            print_stdout(table)?;
+
+            Ok(())
+        }
+        WorkspaceCommand::Module(workspace_module_args) => {
+            run_workspace_module_args(workspace_module_args)
+        }
+    }
+}
+
+fn run_workspace_module_args(args: WorkspaceModuleArgs) -> Result<(), Error> {
+    match args.command {
+        WorkspaceModuleCommand::List {
+            path,
+            page,
+            per_page,
+        } => {
+            let directory = std::env::current_dir()?;
+            let project = query::Project::new(vec![directory])?;
+            let workspace_directory = path.canonicalize()?;
+            let workspace_id = project
+                .graph
+                .find_workspace_by_path(&workspace_directory)
+                .ok_or_else(|| Error::WorkspaceNotFound(workspace_directory.clone()))?;
+
+            let mut modules = project
+                .graph
+                .workspace_modules(&workspace_id)
+                .collect::<Vec<_>>();
+
+            modules.sort_by(|a, b| {
+                let a_module = project.graph.module(a);
+                let b_module = project.graph.module(b);
+                a_module.path.cmp(&b_module.path)
+            });
+
+            if let Some(page) = page {
+                let per_page = per_page.unwrap_or(10);
+                let start = ((page - 1) * per_page).min(modules.len());
+                let end = (start + per_page).min(modules.len());
+                modules = modules[start..end].to_vec();
+            }
+
+            let table = modules
+                .iter()
+                .map(|module_id| {
+                    let module = project.graph.module(module_id);
+                    let relative = module
+                        .path
+                        .strip_prefix(&workspace_directory)
+                        .unwrap_or(&module.path);
+                    vec![relative.display().to_string().cell()]
+                })
+                .collect::<Vec<_>>()
+                .table()
+                .title(vec!["Module".cell()]);
 
             print_stdout(table)?;
 
