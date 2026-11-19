@@ -4,3 +4,8 @@ members = [
   "crates/query-cli",
 ]
 resolver = "3"
+
+[profile.benchmark]
+inherits = "release"
+debug = "line-tables-only"  # Keeps file and line info for perf without huge binary sizes
+strip = "none"              # Ensures symbols are not stripped
