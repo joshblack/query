@@ -227,9 +227,9 @@ fn run_workspace_args(args: WorkspaceArgs) -> Result<(), Error> {
             let table = workspaces
                 .iter()
                 .map(|workspace_id| {
-                    let source_id = project.graph.workspace_source(&workspace_id);
+                    let source_id = project.graph.workspace_source(workspace_id);
                     let source = project.graph.source(&source_id);
-                    let workspace = project.graph.workspace(&workspace_id);
+                    let workspace = project.graph.workspace(workspace_id);
 
                     if source.path == workspace.path {
                         vec![workspace.path.display().to_string().cell()]

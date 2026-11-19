@@ -49,7 +49,7 @@ impl Project {
 
             walker.filter_map(|entry| match entry {
                 Ok(entry) => {
-                    if entry.file_type().map_or(false, |ft| ft.is_file()) {
+                    if entry.file_type().is_some_and(|ft| ft.is_file()) {
                         Some((entry.into_path(), *source_id))
                     } else {
                         None
