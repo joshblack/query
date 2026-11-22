@@ -2,7 +2,7 @@ use std::path::Path;
 
 use oxc_span::{SourceType, UnknownExtension};
 use parse::parse;
-pub use parse::{Export, Import, ImportOrExportKind, ParseError};
+pub use parse::{Export, Import, ImportOrExportKind, ParseError, Unsupported, VisitError};
 pub use project::Project;
 
 mod parse;
