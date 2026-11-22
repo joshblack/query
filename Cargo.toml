@@ -5,6 +5,9 @@ members = [
 ]
 resolver = "3"
 
+[workspace.package]
+rust-version = "1.100"
+
 [profile.benchmark]
 inherits = "release"
 debug = "line-tables-only"  # Keeps file and line info for perf without huge binary sizes
