@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{cmp::Reverse, collections::BTreeMap, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 use cli_table::{Cell, Table, print_stdout};
@@ -13,9 +13,25 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(subcommand)]
+    Error(ErrorCommand),
     Module(ModuleArgs),
     Parse(ParseArgs),
+    #[command(subcommand)]
+    Unsupported(UnsupportedCommand),
     Workspace(WorkspaceArgs),
+}
+
+#[derive(Subcommand)]
+enum ErrorCommand {
+    /// List module errors in the project
+    List,
+}
+
+#[derive(Subcommand)]
+enum UnsupportedCommand {
+    /// Count unsupported syntax by type
+    List,
 }
 
 #[derive(clap::Args)]
@@ -138,12 +154,60 @@ pub fn run() -> Result<(), Error> {
 
     match cli.command {
         Some(command) => match command {
+            Command::Error(ErrorCommand::List) => list_project_errors(),
             Command::Module(module_args) => run_module_args(module_args),
             Command::Parse(parse_args) => run_parse_args(parse_args),
+            Command::Unsupported(UnsupportedCommand::List) => list_project_unsupported(),
             Command::Workspace(workspaces_args) => run_workspace_args(workspaces_args),
         },
         None => Ok(()),
     }
+}
+
+fn list_project_errors() -> Result<(), Error> {
+    let directory = std::env::current_dir()?;
+    let project = query::Project::new(vec![&directory])?;
+    let mut errors = project
+        .errors
+        .iter()
+        .map(|entry| {
+            let path = &project.graph.module(&entry.module_id).path;
+            let path = path.strip_prefix(&directory).unwrap_or(path);
+            (path, entry.error.to_string())
+        })
+        .collect::<Vec<_>>();
+    errors.sort_unstable();
+
+    let table = errors
+        .into_iter()
+        .map(|(path, error)| vec![path.display().to_string().cell(), error.cell()])
+        .collect::<Vec<_>>()
+        .table()
+        .title(vec!["Module".cell(), "Error".cell()]);
+    print_stdout(table)?;
+    Ok(())
+}
+
+fn list_project_unsupported() -> Result<(), Error> {
+    let project = query::Project::new(vec![std::env::current_dir()?])?;
+    let mut counts = BTreeMap::new();
+    for entry in &project.unsupported {
+        *counts
+            .entry(entry.unsupported.ast_kind.as_str())
+            .or_insert(0) += 1;
+    }
+
+    let mut counts = counts.into_iter().collect::<Vec<_>>();
+    counts.sort_unstable_by_key(|&(kind, count)| (Reverse(count), kind));
+
+    let table = counts
+        .into_iter()
+        .map(|(kind, count)| vec![kind.cell(), count.cell()])
+        .collect::<Vec<_>>()
+        .table()
+        .title(vec!["Type".cell(), "Count".cell()]);
+    print_stdout(table)?;
+    Ok(())
 }
 
 fn run_module_args(args: ModuleArgs) -> Result<(), Error> {

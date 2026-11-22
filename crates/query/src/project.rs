@@ -12,12 +12,24 @@ use petgraph::{
 use rayon::prelude::*;
 
 use crate::{
-    Export, ImportOrExportKind,
+    Export, ImportOrExportKind, Unsupported, VisitError,
     parse::{ParseResult, Span, parse},
 };
 
 pub struct Project {
     pub graph: Graph,
+    pub errors: Vec<ModuleError>,
+    pub unsupported: Vec<UnsupportedOccurrence>,
+}
+
+pub struct ModuleError {
+    pub module_id: ModuleId,
+    pub error: Error,
+}
+
+pub struct UnsupportedOccurrence {
+    pub module_id: ModuleId,
+    pub unsupported: Unsupported,
 }
 
 impl Project {
@@ -139,24 +151,38 @@ impl Project {
         let parse_results = module_ids
             .into_par_iter()
             .map_init(Allocator::new, |allocator, module_id| {
-                with_arena(allocator, |allocator| {
+                let result = with_arena(allocator, |allocator| {
                     let module = graph.module(&module_id);
                     let source = std::fs::read_to_string(&module.path)?;
                     let source_type = oxc_span::SourceType::from_path(&module.path)?;
-                    let ret = parse(&allocator, &source, source_type)?;
-
-                    Ok((module_id, ret))
-                })
+                    Ok(parse(allocator, &source, source_type)?)
+                });
+                (module_id, result)
             })
-            .collect::<Vec<Result<(ModuleId, ParseResult), Error>>>();
+            .collect::<Vec<(ModuleId, Result<ParseResult, Error>)>>();
 
-        for parse_result in parse_results {
-            let Ok((module_id, ret)) = parse_result else {
-                continue;
+        let mut errors = Vec::new();
+        let mut unsupported = Vec::new();
+        for (module_id, result) in parse_results {
+            let ret = match result {
+                Ok(ret) => ret,
+                Err(error) => {
+                    errors.push(ModuleError { module_id, error });
+                    continue;
+                }
             };
 
-            // Capture errors
-            // Capture unsupported
+            errors.extend(ret.errors.into_iter().map(|error| ModuleError {
+                module_id,
+                error: error.into(),
+            }));
+            unsupported.extend(ret.unsupported.into_iter().map(|unsupported| {
+                UnsupportedOccurrence {
+                    module_id,
+                    unsupported,
+                }
+            }));
+
             // Queue up imports and pending exports for later (what order to pick?)
             // Add stable exports
 
@@ -186,7 +212,11 @@ impl Project {
             }
         }
 
-        Ok(Self { graph })
+        Ok(Self {
+            graph,
+            errors,
+            unsupported,
+        })
     }
 }
 
@@ -209,6 +239,9 @@ pub enum Error {
 
     #[error("Failed to parse source type: {0}")]
     SourceTypeError(#[from] oxc_span::UnknownExtension),
+
+    #[error(transparent)]
+    VisitError(#[from] VisitError),
 }
 
 fn with_arena<T>(arena: &mut Allocator, run: impl FnOnce(&Allocator) -> T) -> T {
@@ -508,6 +541,63 @@ mod tests {
     use super::*;
 
     use anyhow::Result;
+
+    #[test]
+    fn test_module_diagnostics() -> Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let directory = tempdir.path();
+        let invalid = directory.join("invalid.ts");
+        let partial = directory.join("partial.ts");
+
+        std::fs::write(&invalid, "export const =")?;
+        std::fs::write(
+            &partial,
+            concat!(
+                "const first = 1, second = 2;\n",
+                "export { first }; export { second as first };\n",
+                "export const { x } = { x: 1 };\n",
+                "export const [y] = [2];\n",
+                "export const { z } = { z: 3 };\n",
+            ),
+        )?;
+
+        let project = Project::new(vec![directory])?;
+        let invalid_id = project.graph.find_module_by_path(invalid).unwrap();
+        let partial_id = project.graph.find_module_by_path(partial).unwrap();
+        assert_eq!(project.errors.len(), 2);
+        assert!(project.errors.iter().any(|entry| {
+            entry.module_id == invalid_id && matches!(entry.error, Error::ParseError(_))
+        }));
+        assert!(project.errors.iter().any(|entry| {
+            entry.module_id == partial_id
+                && matches!(
+                    entry.error,
+                    Error::VisitError(VisitError::DuplicateExport(_))
+                )
+        }));
+        let occurrences = project
+            .unsupported
+            .iter()
+            .map(|entry| {
+                assert_eq!(entry.module_id, partial_id);
+                (
+                    entry.unsupported.ast_kind.as_str(),
+                    entry.unsupported.span.start.line,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            occurrences,
+            [
+                ("ObjectPattern", 3),
+                ("ArrayPattern", 4),
+                ("ObjectPattern", 5)
+            ]
+        );
+        assert!(project.graph.module_exports(&partial_id).next().is_some());
+
+        Ok(())
+    }
 
     #[test]
     fn test_single_workspace() -> Result<()> {
