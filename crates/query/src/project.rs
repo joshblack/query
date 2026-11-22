@@ -5,15 +5,20 @@ use std::{
 
 use ignore::{WalkBuilder, types::TypesBuilder};
 use oxc_allocator::Allocator;
+use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
 use petgraph::{
+    algo::kosaraju_scc,
     csr::DefaultIx,
     graph::{DiGraph, NodeIndex},
+    visit::{EdgeFiltered, EdgeRef, NodeFiltered},
 };
 use rayon::prelude::*;
 
 use crate::{
-    Export, ImportOrExportKind, Unsupported, VisitError,
-    parse::{ParseResult, Span, parse},
+    Export, Import,
+    ImportOrExportKind::{self, Type, Value},
+    Unsupported, VisitError,
+    parse::{ParseResult, PendingExport, Span, parse},
 };
 
 pub struct Project {
@@ -138,19 +143,21 @@ impl Project {
             .into_iter()
             .map(|path| {
                 let workspace_id = path.ancestors().skip(1).find_map(|dir| workspaces.get(dir));
+                let module_path = path.clone();
                 let module = Module { path };
-
-                if let Some(workspace_id) = workspace_id {
+                let module_id = if let Some(workspace_id) = workspace_id {
                     graph.insert_workspace_module(workspace_id, module)
                 } else {
                     graph.insert_module(module)
-                }
+                };
+
+                (module_path, module_id)
             })
-            .collect::<Vec<_>>();
+            .collect::<HashMap<_, _>>();
 
         let parse_results = module_ids
-            .into_par_iter()
-            .map_init(Allocator::new, |allocator, module_id| {
+            .par_iter()
+            .map_init(Allocator::new, |allocator, (_, &module_id)| {
                 let result = with_arena(allocator, |allocator| {
                     let module = graph.module(&module_id);
                     let source = std::fs::read_to_string(&module.path)?;
@@ -163,8 +170,10 @@ impl Project {
 
         let mut errors = Vec::new();
         let mut unsupported = Vec::new();
+        let mut parsed_modules = Vec::new();
+
         for (module_id, result) in parse_results {
-            let ret = match result {
+            let mut ret = match result {
                 Ok(ret) => ret,
                 Err(error) => {
                     errors.push(ModuleError { module_id, error });
@@ -172,46 +181,22 @@ impl Project {
                 }
             };
 
-            errors.extend(ret.errors.into_iter().map(|error| ModuleError {
+            errors.extend(ret.errors.drain(..).map(|error| ModuleError {
                 module_id,
                 error: error.into(),
             }));
-            unsupported.extend(ret.unsupported.into_iter().map(|unsupported| {
+
+            unsupported.extend(ret.unsupported.drain(..).map(|unsupported| {
                 UnsupportedOccurrence {
                     module_id,
                     unsupported,
                 }
             }));
 
-            // Queue up imports and pending exports for later (what order to pick?)
-            // Add stable exports
-
-            for export in ret.exports.into_values() {
-                match export {
-                    Export::Default(default_export) => {
-                        graph.insert_module_export(
-                            &module_id,
-                            ModuleExport {
-                                binding: "default".to_string(),
-                                export_kind: ImportOrExportKind::Value,
-                                span: default_export.span,
-                            },
-                        );
-                    }
-                    Export::Named(named_export) => {
-                        graph.insert_module_export(
-                            &module_id,
-                            ModuleExport {
-                                binding: named_export.binding.clone(),
-                                export_kind: named_export.export_kind,
-                                span: named_export.span,
-                            },
-                        );
-                    }
-                }
-            }
+            parsed_modules.push((module_id, ret));
         }
 
+        link_modules(&mut graph, &module_ids, &parsed_modules);
         Ok(Self {
             graph,
             errors,
@@ -309,17 +294,21 @@ impl Graph {
             })
     }
 
+    /// Indexed modules referenced by this module's imports and re-exports.
+    pub fn module_dependencies(&self, module_id: &ModuleId) -> impl Iterator<Item = ModuleId> {
+        self.graph
+            .edges(module_id.0)
+            .filter(|edge| matches!(edge.weight(), Edge::ModuleDependency { .. }))
+            .map(|edge| ModuleId(edge.target()))
+    }
+
     // Module -[ModuleExport]-> ModuleExport -----------------------------------
 
     pub fn module_exports(&self, module_id: &ModuleId) -> impl Iterator<Item = ModuleExportId> {
         self.graph
-            .neighbors_directed(module_id.0, petgraph::Direction::Outgoing)
-            .filter_map(|module_export_index| {
-                let Node::ModuleExport(_) = &self.graph[module_export_index] else {
-                    return None;
-                };
-                Some(ModuleExportId(module_export_index))
-            })
+            .edges(module_id.0)
+            .filter(|edge| matches!(edge.weight(), Edge::ModuleExport))
+            .map(|edge| ModuleExportId(edge.target()))
     }
 
     pub fn module_export(&self, module_export_id: &ModuleExportId) -> &ModuleExport {
@@ -484,6 +473,10 @@ enum Node {
 }
 
 enum Edge {
+    ImportBinding,
+    ModuleDependency {
+        re_export: bool,
+    },
     /// A directed edge from a Workspace to one of its child Workspaces
     ChildWorkspace,
     /// A directed edge from a Module to one of its Exports
@@ -536,11 +529,516 @@ pub struct ModuleExport {
     pub span: Span,
 }
 
+type Key<'a> = (&'a str, ImportOrExportKind);
+type Exports<'a> = HashMap<Key<'a>, Resolution>;
+
+#[derive(Clone, Copy)]
+enum Target<'a> {
+    Local(NodeIndex),
+    Namespace(Option<ModuleId>),
+    Name(Option<ModuleId>, &'a str),
+}
+
+#[derive(Default)]
+struct ModuleLinks<'a> {
+    imports: HashMap<&'a str, (Target<'a>, ImportOrExportKind)>,
+    explicit: HashMap<Key<'a>, (Target<'a>, Span)>,
+    stars: Vec<(ModuleId, ImportOrExportKind, Span)>,
+}
+
+impl<'a> ModuleLinks<'a> {
+    fn alias(&mut self, key: Key<'a>, target: Target<'a>, span: Span) {
+        self.explicit.insert(key, (target, span));
+        if key.1 == Value && matches!(target, Target::Name(..)) {
+            self.explicit.entry((key.0, Type)).or_insert((target, span));
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Resolution {
+    Binding(NodeIndex, Span),
+    Ambiguous,
+}
+
+fn link_modules(
+    graph: &mut Graph,
+    module_ids: &HashMap<PathBuf, ModuleId>,
+    parsed: &[(ModuleId, ParseResult)],
+) {
+    let strings = |values: &[&str]| values.iter().map(|value| (*value).to_owned()).collect();
+    let resolver = Resolver::new(ResolveOptions {
+        tsconfig: Some(TsconfigDiscovery::Auto),
+        condition_names: strings(&["node", "import"]),
+        extensions: strings(&[".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"]),
+        extension_alias: vec![
+            (".js".into(), strings(&[".js", ".ts", ".tsx"])),
+            (".mjs".into(), strings(&[".mjs", ".mts"])),
+            (".cjs".into(), strings(&[".cjs", ".cts"])),
+        ],
+        ..ResolveOptions::default()
+    });
+    let mut directories = HashMap::new();
+    let canonical_ids = module_ids
+        .iter()
+        .filter_map(|(path, &id)| {
+            let parent = path.parent()?;
+            let canonical = directories
+                .entry(parent)
+                .or_insert_with(|| parent.canonicalize().ok().filter(|path| path != parent));
+            Some((canonical.as_ref()?.join(path.file_name()?), id))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let modules = parsed
+        .iter()
+        .map(|(id, parsed)| {
+            let mut cache = HashMap::new();
+            let links = link_module(graph, *id, parsed, |path, source| {
+                *cache.entry(source).or_insert_with(|| {
+                    let resolved = resolver.resolve_file(path, source).ok()?;
+                    module_ids
+                        .get(resolved.path())
+                        .or_else(|| canonical_ids.get(resolved.path()))
+                        .copied()
+                })
+            });
+            (*id, links)
+        })
+        .collect::<HashMap<_, _>>();
+
+    let dependencies = EdgeFiltered::from_fn(&graph.graph, |edge| {
+        matches!(edge.weight(), Edge::ModuleDependency { re_export: true })
+    });
+    let module_graph = NodeFiltered::from_fn(&dependencies, |id| {
+        matches!(graph.graph[id], Node::Module(_))
+    });
+    let mut settled = HashMap::<ModuleId, Exports<'_>>::new();
+    for component in kosaraju_scc(&module_graph) {
+        // Only reuse complete results from earlier components, not cycle cutoffs.
+        let resolved = component
+            .into_iter()
+            .map(ModuleId)
+            .filter(|id| modules.contains_key(id))
+            .map(|id| {
+                let exports = [Type, Value]
+                    .into_iter()
+                    .flat_map(|kind| candidate_names(&modules, &settled, id, kind))
+                    .filter_map(|key| Some((key, resolve(&modules, &settled, id, key)?)))
+                    .collect();
+                (id, exports)
+            })
+            .collect::<Vec<_>>();
+        settled.extend(resolved);
+    }
+
+    for (id, links) in modules {
+        for (&(name, kind), &result) in &settled[&id] {
+            if let Resolution::Binding(_, span) = result
+                && !matches!(
+                    links.explicit.get(&(name, kind)),
+                    Some((Target::Local(_), _))
+                )
+            {
+                insert_export(graph, id, (name, kind), span);
+            }
+        }
+        for (target, kind) in links.imports.into_values() {
+            let target = match target {
+                Target::Name(Some(provider), name) => settled.get(&provider).and_then(|exports| {
+                    let result = exports.get(&(name, kind)).or_else(|| {
+                        if kind == Value {
+                            exports.get(&(name, Type))
+                        } else {
+                            None
+                        }
+                    });
+                    match result {
+                        Some(Resolution::Binding(origin, _)) => Some(*origin),
+                        _ => None,
+                    }
+                }),
+                Target::Namespace(provider) => provider.map(|id| id.0),
+                _ => None,
+            };
+            if let Some(target) = target {
+                graph.graph.add_edge(id.0, target, Edge::ImportBinding);
+            }
+        }
+    }
+}
+
+fn link_module<'a>(
+    graph: &mut Graph,
+    id: ModuleId,
+    parsed: &'a ParseResult,
+    mut resolve: impl FnMut(&Path, &'a str) -> Option<ModuleId>,
+) -> ModuleLinks<'a> {
+    let mut links = ModuleLinks::default();
+    let mut dependencies = HashMap::new();
+    let path = &graph.module(&id).path;
+    let mut dependency = |source, re_export| {
+        let target = resolve(path, source)?;
+        *dependencies.entry(target).or_insert(false) |= re_export;
+        Some(target)
+    };
+    for import in &parsed.imports {
+        let (local, source, name, kind) = match import {
+            Import::Named(i) => (
+                &i.local,
+                &i.source,
+                Some(i.imported.as_str()),
+                i.import_kind,
+            ),
+            Import::Default(i) => (&i.local, &i.source, Some("default"), i.import_kind),
+            Import::Namespace(i) => (&i.local, &i.source, None, i.import_kind),
+        };
+        let provider = dependency(source, false);
+        let target = match name {
+            Some(name) => Target::Name(provider, name),
+            None => Target::Namespace(provider),
+        };
+        links.imports.insert(local, (target, kind));
+    }
+    for source in &parsed.side_effect_dependencies {
+        dependency(source, false);
+    }
+    for export in &parsed.pending_exports {
+        match export {
+            PendingExport::Named(e) => links.alias(
+                (&e.exported, e.export_kind),
+                Target::Name(dependency(&e.source, true), &e.local),
+                e.span,
+            ),
+            PendingExport::Namespace(e) => {
+                let target = Target::Namespace(dependency(&e.source, true));
+                links
+                    .explicit
+                    .insert((&e.exported, e.export_kind), (target, e.span));
+            }
+            PendingExport::All(e) => {
+                if let Some(target) = dependency(&e.source, true) {
+                    links.stars.push((target, e.export_kind, e.span));
+                }
+            }
+        }
+    }
+
+    let mut locals = Vec::new();
+    for export in parsed.exports.values() {
+        let (key, local, span) = match export {
+            Export::Default(e) => (("default", Value), "default", e.span),
+            Export::Named(e) => {
+                let name = e.binding.as_str();
+                (
+                    (name, e.export_kind),
+                    e.local.as_deref().unwrap_or(name),
+                    e.span,
+                )
+            }
+        };
+        if let Some(&(target, kind)) = links.imports.get(local) {
+            if let Target::Name(Some(module), _) | Target::Namespace(Some(module)) = target {
+                dependencies.insert(module, true);
+            }
+            links.alias(
+                (key.0, if kind == Type { Type } else { key.1 }),
+                target,
+                span,
+            );
+        } else {
+            locals.push((key, local, span));
+        }
+    }
+    for (target, re_export) in dependencies {
+        graph
+            .graph
+            .add_edge(id.0, target.0, Edge::ModuleDependency { re_export });
+    }
+
+    // Prefer the original spelling when several exports refer to the same local.
+    locals.sort_unstable_by_key(|(key, local, span)| {
+        (*local != key.0, span.start.line, span.start.column)
+    });
+    let mut originals = HashMap::new();
+    for (key, local, span) in locals {
+        let node = insert_export(graph, id, key, span);
+        let origin = *originals.entry((local, key.1)).or_insert(node);
+        links.explicit.insert(key, (Target::Local(origin), span));
+    }
+    links
+}
+
+fn candidate_names<'a>(
+    modules: &HashMap<ModuleId, ModuleLinks<'a>>,
+    settled: &HashMap<ModuleId, Exports<'a>>,
+    root: ModuleId,
+    kind: ImportOrExportKind,
+) -> HashSet<Key<'a>> {
+    let mut names = HashSet::new();
+    let mut seen = HashSet::new();
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let include =
+            |&&(name, space): &&Key<'_>| space == kind && (id == root || name != "default");
+        if let Some(exports) = settled.get(&id) {
+            names.extend(exports.keys().filter(include).copied());
+        } else if let Some(links) = modules.get(&id) {
+            names.extend(links.explicit.keys().filter(include).copied());
+            pending.extend(star_targets(links, kind).map(|(target, _)| target));
+        }
+    }
+    names
+}
+
+fn resolve<'a>(
+    modules: &HashMap<ModuleId, ModuleLinks<'a>>,
+    settled: &HashMap<ModuleId, Exports<'a>>,
+    root: ModuleId,
+    key: Key<'a>,
+) -> Option<Resolution> {
+    if let Some(&(Target::Local(origin), span)) = modules[&root].explicit.get(&key) {
+        return Some(Resolution::Binding(origin, span));
+    }
+    let mut seen = HashSet::new();
+    let mut pending = vec![(root, key.0, None)];
+    let mut binding = None;
+    while let Some((id, name, span)) = pending.pop() {
+        if !seen.insert((id, name)) {
+            continue;
+        }
+        let kind = key.1;
+        let result = if let Some(exports) = settled.get(&id) {
+            match exports.get(&(name, kind)) {
+                Some(Resolution::Binding(origin, site)) => Some((*origin, span.unwrap_or(*site))),
+                Some(Resolution::Ambiguous) => return Some(Resolution::Ambiguous),
+                None => None,
+            }
+        } else if let Some(links) = modules.get(&id) {
+            if let Some(&(target, site)) = links.explicit.get(&(name, kind)) {
+                let span = span.unwrap_or(site);
+                match target {
+                    Target::Local(origin) => Some((origin, span)),
+                    Target::Namespace(module) => module.map(|id| (id.0, span)),
+                    Target::Name(Some(module), imported) => {
+                        pending.push((module, imported, Some(span)));
+                        None
+                    }
+                    Target::Name(None, _) => None,
+                }
+            } else {
+                if name != "default" {
+                    pending.extend(
+                        star_targets(links, kind)
+                            .rev()
+                            .map(|(target, site)| (target, name, span.or(Some(site)))),
+                    );
+                }
+                None
+            }
+        } else {
+            None
+        };
+        if let Some((origin, span)) = result {
+            if let Some((previous, _)) = binding {
+                if previous != origin {
+                    return Some(Resolution::Ambiguous);
+                }
+            } else {
+                binding = Some((origin, span));
+            }
+        }
+    }
+    binding.map(|(origin, span)| Resolution::Binding(origin, span))
+}
+
+fn star_targets(
+    links: &ModuleLinks<'_>,
+    kind: ImportOrExportKind,
+) -> impl DoubleEndedIterator<Item = (ModuleId, Span)> {
+    links
+        .stars
+        .iter()
+        .filter_map(move |&(target, star_kind, span)| {
+            (star_kind == Value || kind == Type).then_some((target, span))
+        })
+}
+
+fn insert_export(graph: &mut Graph, id: ModuleId, key: Key<'_>, span: Span) -> NodeIndex {
+    graph
+        .insert_module_export(
+            &id,
+            ModuleExport {
+                binding: key.0.to_owned(),
+                export_kind: key.1,
+                span,
+            },
+        )
+        .0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use anyhow::Result;
+
+    fn module_id(project: &Project, directory: &Path, file: &str) -> ModuleId {
+        project
+            .graph
+            .find_module_by_path(directory.join(file))
+            .unwrap()
+    }
+
+    fn exported(graph: &Graph, module: ModuleId, name: &str) -> Option<ModuleExportId> {
+        graph
+            .module_exports(&module)
+            .find(|id| graph.module_export(id).binding == name)
+    }
+
+    fn import_targets(graph: &Graph, module: ModuleId) -> HashSet<NodeIndex> {
+        graph
+            .graph
+            .edges(module.0)
+            .filter(|edge| matches!(edge.weight(), Edge::ImportBinding))
+            .map(|edge| edge.target())
+            .collect()
+    }
+
+    #[test]
+    fn test_links_module_dependencies_and_bindings() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        for (file, source) in [
+            (
+                "tsconfig.json",
+                r#"{"compilerOptions":{"paths":{"@barrel":["./barrel.ts"]}}}"#,
+            ),
+            (
+                "leaf.ts",
+                r#"import { start } from "./entry";
+                   export const x = 1;
+                   export default 2;
+                   export type Shape = string;"#,
+            ),
+            (
+                "barrel.ts",
+                r#"import { x as local } from "./leaf.js";
+                   export { local as alias };
+                   export { default as renamed } from "./leaf.js";
+                   export * as ns from "./leaf.js";
+                   export * from "./leaf.js";"#,
+            ),
+            ("side.ts", ""),
+            (
+                "entry.ts",
+                r#"import { alias, renamed, ns, type Shape } from "@barrel";
+                   import defaultFromStar from "@barrel";
+                   import * as barrel from "@barrel";
+                   import { missing } from "./missing";
+                   import "./side";
+                   export const start = 1;"#,
+            ),
+        ] {
+            std::fs::write(root.join(file), source)?;
+        }
+
+        let project = Project::new(vec![root])?;
+        assert!(project.errors.is_empty());
+        let graph = &project.graph;
+        let leaf = module_id(&project, root, "leaf.ts");
+        let barrel = module_id(&project, root, "barrel.ts");
+        let entry = module_id(&project, root, "entry.ts");
+        let side = module_id(&project, root, "side.ts");
+        assert_eq!(
+            graph.module_dependencies(&barrel).collect::<Vec<_>>(),
+            [leaf]
+        );
+        assert_eq!(
+            graph.module_dependencies(&entry).collect::<HashSet<_>>(),
+            HashSet::from([barrel, side]),
+        );
+
+        for name in ["alias", "renamed", "ns", "Shape"] {
+            assert!(exported(graph, barrel, name).is_some());
+        }
+        assert_eq!(exported(graph, barrel, "default"), None);
+        assert_eq!(exported(graph, leaf, "start"), None);
+        assert_eq!(
+            import_targets(graph, entry),
+            HashSet::from([
+                exported(graph, leaf, "x").unwrap().0,
+                exported(graph, leaf, "default").unwrap().0,
+                exported(graph, leaf, "Shape").unwrap().0,
+                leaf.0,
+                barrel.0,
+            ]),
+        );
+        assert_eq!(
+            import_targets(graph, leaf),
+            HashSet::from([exported(graph, entry, "start").unwrap().0]),
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolves_export_cycles_and_star_ambiguity() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        for (file, source) in [
+            ("leaf.ts", "export const x = 1, y = 2, z = 3;"),
+            (
+                "a.ts",
+                r#"export * from "./b";
+                   export * from "./leaf";
+                   export { loop } from "./b";"#,
+            ),
+            (
+                "b.ts",
+                r#"export * from "./a";
+                   export { x, y } from "./leaf";
+                   export { loop } from "./a";"#,
+            ),
+            ("other.ts", "export const y = 2, z = 3;"),
+            (
+                "entry.ts",
+                r#"export * from "./a";
+                   export * from "./b";
+                   export * from "./other";
+                   export { z } from "./other";"#,
+            ),
+            ("use.ts", r#"import { x, y, z, loop } from "./entry";"#),
+        ] {
+            std::fs::write(root.join(file), source)?;
+        }
+
+        let project = Project::new(vec![root])?;
+        assert!(project.errors.is_empty());
+        let graph = &project.graph;
+        let leaf = module_id(&project, root, "leaf.ts");
+        let a = module_id(&project, root, "a.ts");
+        let b = module_id(&project, root, "b.ts");
+        let other = module_id(&project, root, "other.ts");
+        let entry = module_id(&project, root, "entry.ts");
+        let consumer = module_id(&project, root, "use.ts");
+
+        for module in [a, b, entry] {
+            assert!(exported(graph, module, "x").is_some());
+            assert_eq!(exported(graph, module, "loop"), None);
+        }
+        assert_eq!(exported(graph, entry, "y"), None);
+        assert_eq!(
+            import_targets(graph, consumer),
+            HashSet::from([
+                exported(graph, leaf, "x").unwrap().0,
+                exported(graph, other, "z").unwrap().0,
+            ]),
+        );
+        Ok(())
+    }
 
     #[test]
     fn test_module_diagnostics() -> Result<()> {
