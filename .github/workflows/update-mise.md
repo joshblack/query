@@ -123,9 +123,10 @@ formatting, including `[settings]`, `[wrappers.cargo]`, tasks, `postinstall`,
 run postinstall hooks, or modify any other file. If all versions are already
 exactly current, use the noop safe output and do not create a pull request.
 
-Review `git diff --check` and `git diff -- mise.toml` before requesting the
-create-pull-request safe output. Do not commit changes locally; leave the
-version-only diff for the safe-output handler.
+Review `git diff --check` and `git diff -- mise.toml`, then stage and commit
+only `mise.toml` before requesting the create-pull-request safe output. The
+safe-output handler needs the local commit to create the pull request; do not
+push the branch yourself.
 
 Use the pull request title `update mise tools` (the configured prefix adds
 `chore(deps): `). Fill out the repository's pull request template if one
