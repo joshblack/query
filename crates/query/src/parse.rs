@@ -45,6 +45,7 @@ pub struct ParseResult {
     pub errors: Vec<VisitError>,
     pub exports: HashMap<ExportKey, Export>,
     pub imports: Vec<Import>,
+    pub side_effect_dependencies: Vec<String>,
     pub pending_exports: Vec<PendingExport>,
     pub unsupported: Vec<Unsupported>,
 }
@@ -55,6 +56,7 @@ impl From<Visitor> for ParseResult {
             errors: visitor.errors,
             exports: visitor.exports,
             imports: visitor.imports,
+            side_effect_dependencies: visitor.side_effect_dependencies,
             pending_exports: visitor.pending_exports,
             unsupported: visitor.unsupported,
         }
@@ -66,6 +68,7 @@ pub struct Visitor {
     errors: Vec<VisitError>,
     exports: HashMap<ExportKey, Export>,
     imports: Vec<Import>,
+    side_effect_dependencies: Vec<String>,
     line_index: LineIndex,
     pending_exports: Vec<PendingExport>,
     unsupported: Vec<Unsupported>,
@@ -77,6 +80,7 @@ impl Visitor {
             errors: Default::default(),
             exports: Default::default(),
             imports: Default::default(),
+            side_effect_dependencies: Default::default(),
             line_index: LineIndex::new(source),
             pending_exports: Default::default(),
             unsupported: Default::default(),
@@ -142,6 +146,7 @@ impl<'a> Visit<'a> for Visitor {
                         BindingPattern::BindingIdentifier(binding_identifier) => {
                             let binding = binding_identifier.name.to_string();
                             self.insert_export(Export::Named(NamedExport {
+                                local: None,
                                 binding,
                                 span: Span::from_oxc_span(&self.line_index, declarator.span),
                                 export_kind: ImportOrExportKind::Value,
@@ -175,6 +180,7 @@ impl<'a> Visit<'a> for Visitor {
                 if let Some(id) = &function.id {
                     let binding = id.name.to_string();
                     self.insert_export(Export::Named(NamedExport {
+                        local: None,
                         binding,
                         span: Span::from_oxc_span(&self.line_index, function.span),
                         export_kind: ImportOrExportKind::Value,
@@ -185,6 +191,7 @@ impl<'a> Visit<'a> for Visitor {
                 if let Some(id) = &class.id {
                     let binding = id.name.to_string();
                     self.insert_export(Export::Named(NamedExport {
+                        local: None,
                         binding,
                         span: Span::from_oxc_span(&self.line_index, class.span),
                         export_kind: ImportOrExportKind::Value,
@@ -194,6 +201,7 @@ impl<'a> Visit<'a> for Visitor {
             Declaration::TSTypeAliasDeclaration(tstype_alias_declaration) => {
                 let binding = tstype_alias_declaration.id.name.to_string();
                 self.insert_export(Export::Named(NamedExport {
+                    local: None,
                     binding,
                     span: Span::from_oxc_span(&self.line_index, tstype_alias_declaration.span),
                     export_kind: ImportOrExportKind::Type,
@@ -202,6 +210,7 @@ impl<'a> Visit<'a> for Visitor {
             Declaration::TSInterfaceDeclaration(tsinterface_declaration) => {
                 let binding = tsinterface_declaration.id.name.to_string();
                 self.insert_export(Export::Named(NamedExport {
+                    local: None,
                     binding,
                     span: Span::from_oxc_span(&self.line_index, tsinterface_declaration.span),
                     export_kind: ImportOrExportKind::Type,
@@ -239,6 +248,9 @@ impl<'a> Visit<'a> for Visitor {
             return;
         };
 
+        if declaration.specifiers.is_empty() {
+            self.side_effect_dependencies.push(source.to_string());
+        }
         for specifier in &declaration.specifiers {
             self.pending_exports
                 .push(PendingExport::Named(PendingNamedExport {
@@ -265,6 +277,7 @@ impl<'a> Visit<'a> for Visitor {
                 oxc_ast::ast::ImportOrExportKind::Value => specifier.export_kind.into(),
             };
             self.insert_export(Export::Named(NamedExport {
+                local: Some(specifier.local.name().to_string()),
                 binding,
                 span: Span::from_oxc_span(&self.line_index, specifier.span),
                 export_kind,
@@ -282,7 +295,14 @@ impl<'a> Visit<'a> for Visitor {
             return;
         };
 
-        for specifier in declaration.specifiers.iter().flatten() {
+        let Some(specifiers) = &declaration.specifiers else {
+            self.side_effect_dependencies.push(source.to_string());
+            return;
+        };
+        if specifiers.is_empty() {
+            self.side_effect_dependencies.push(source.to_string());
+        }
+        for specifier in specifiers {
             match specifier {
                 ImportDeclarationSpecifier::ImportSpecifier(import_specifier) => {
                     self.imports.push(Import::Named(NamedImport {
@@ -393,6 +413,7 @@ pub struct DefaultExport {
 
 #[derive(Debug)]
 pub struct NamedExport {
+    pub(crate) local: Option<String>,
     pub binding: String,
     pub span: Span,
     pub export_kind: ImportOrExportKind,
@@ -449,7 +470,7 @@ pub struct PendingNamespaceExport {
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SourceLocation {
     pub line: usize,
     pub column: usize,
@@ -477,7 +498,7 @@ pub struct Unsupported {
     pub ast_kind: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Span {
     pub start: SourceLocation,
     pub end: SourceLocation,
