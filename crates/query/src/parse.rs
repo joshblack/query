@@ -15,7 +15,7 @@ pub fn parse<'a>(
     allocator: &'a Allocator,
     source: &'a str,
     source_type: SourceType,
-) -> Result<Visitor, ParseError> {
+) -> Result<ParseResult, ParseError> {
     let parser_ret = Parser::new(allocator, source, source_type).parse();
     if !parser_ret.diagnostics.is_empty() {
         return Err(ParseError::SyntaxError(parser_ret.diagnostics));
@@ -31,7 +31,7 @@ pub fn parse<'a>(
     let mut visitor = Visitor::new(source);
     visitor.visit_program(&parser_ret.program);
 
-    Ok(visitor)
+    Ok(ParseResult::from(visitor))
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -41,12 +41,34 @@ pub enum ParseError {
 }
 
 #[derive(Debug)]
-pub struct Visitor {
-    errors: Vec<VisitError>,
+pub struct ParseResult {
+    pub errors: Vec<VisitError>,
     pub exports: HashMap<ExportKey, Export>,
     pub imports: Vec<Import>,
+    pub pending_exports: Vec<PendingExport>,
+    pub unsupported: Vec<Unsupported>,
+}
+
+impl From<Visitor> for ParseResult {
+    fn from(visitor: Visitor) -> Self {
+        Self {
+            errors: visitor.errors,
+            exports: visitor.exports,
+            imports: visitor.imports,
+            pending_exports: visitor.pending_exports,
+            unsupported: visitor.unsupported,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Visitor {
+    errors: Vec<VisitError>,
+    exports: HashMap<ExportKey, Export>,
+    imports: Vec<Import>,
     line_index: LineIndex,
     pending_exports: Vec<PendingExport>,
+    unsupported: Vec<Unsupported>,
 }
 
 impl Visitor {
@@ -57,6 +79,7 @@ impl Visitor {
             imports: Default::default(),
             line_index: LineIndex::new(source),
             pending_exports: Default::default(),
+            unsupported: Default::default(),
         }
     }
 
@@ -124,9 +147,27 @@ impl<'a> Visit<'a> for Visitor {
                                 export_kind: ImportOrExportKind::Value,
                             }));
                         }
-                        BindingPattern::ObjectPattern(object_pattern) => todo!(),
-                        BindingPattern::ArrayPattern(array_pattern) => todo!(),
-                        BindingPattern::AssignmentPattern(assignment_pattern) => todo!(),
+                        BindingPattern::ObjectPattern(object_pattern) => {
+                            self.unsupported.push(Unsupported {
+                                span: Span::from_oxc_span(&self.line_index, object_pattern.span),
+                                ast_kind: "ObjectPattern".to_string(),
+                            });
+                        }
+                        BindingPattern::ArrayPattern(array_pattern) => {
+                            self.unsupported.push(Unsupported {
+                                span: Span::from_oxc_span(&self.line_index, array_pattern.span),
+                                ast_kind: "ArrayPattern".to_string(),
+                            });
+                        }
+                        BindingPattern::AssignmentPattern(assignment_pattern) => {
+                            self.unsupported.push(Unsupported {
+                                span: Span::from_oxc_span(
+                                    &self.line_index,
+                                    assignment_pattern.span,
+                                ),
+                                ast_kind: "AssignmentPattern".to_string(),
+                            });
+                        }
                     }
                 }
             }
@@ -284,7 +325,7 @@ impl<'a> Visit<'a> for Visitor {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum VisitError {
+pub enum VisitError {
     #[error("Duplicate export found: {0:?}")]
     DuplicateExport(ExportKey),
 
@@ -428,6 +469,12 @@ impl SourceLocation {
             column: location.col as usize + 1,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct Unsupported {
+    pub span: Span,
+    pub ast_kind: String,
 }
 
 #[derive(Debug)]

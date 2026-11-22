@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use cli_table::{Cell, Table, print_stdout};
-use query::{list_exports, project::WorkspaceId};
+use query::{ImportOrExportKind, list_exports, project::WorkspaceId};
 
 #[derive(Parser)]
 #[command(version)]
@@ -13,8 +13,32 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    Module(ModuleArgs),
     Parse(ParseArgs),
     Workspace(WorkspaceArgs),
+}
+
+#[derive(clap::Args)]
+struct ModuleArgs {
+    #[command(subcommand)]
+    command: ModuleCommand,
+}
+
+#[derive(Subcommand)]
+enum ModuleCommand {
+    Export {
+        #[command(subcommand)]
+        command: ModuleExportCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModuleExportCommand {
+    /// List the exports of a module in the project
+    List {
+        /// The path to the module
+        path: PathBuf,
+    },
 }
 
 #[derive(clap::Args)]
@@ -104,6 +128,9 @@ pub enum Error {
 
     #[error("Failed to find workspace by path: {0}")]
     WorkspaceNotFound(PathBuf),
+
+    #[error("Failed to find module by path: {0}")]
+    ModuleNotFound(PathBuf),
 }
 
 pub fn run() -> Result<(), Error> {
@@ -111,11 +138,56 @@ pub fn run() -> Result<(), Error> {
 
     match cli.command {
         Some(command) => match command {
+            Command::Module(module_args) => run_module_args(module_args),
             Command::Parse(parse_args) => run_parse_args(parse_args),
             Command::Workspace(workspaces_args) => run_workspace_args(workspaces_args),
         },
         None => Ok(()),
     }
+}
+
+fn run_module_args(args: ModuleArgs) -> Result<(), Error> {
+    let ModuleCommand::Export {
+        command: ModuleExportCommand::List { path },
+    } = args.command;
+    let module_path = path
+        .canonicalize()
+        .map_err(|_| Error::ModuleNotFound(path))?;
+    let directory = std::env::current_dir()?.canonicalize()?;
+    let project = query::Project::new(vec![directory])?;
+    let graph = &project.graph;
+    let module_id = graph
+        .find_module_by_path(&module_path)
+        .ok_or(Error::ModuleNotFound(module_path))?;
+
+    let mut exports = graph
+        .module_exports(&module_id)
+        .map(|id| graph.module_export(&id))
+        .collect::<Vec<_>>();
+    exports.sort_by(|a, b| {
+        a.binding
+            .cmp(&b.binding)
+            .then_with(|| a.span.start.line.cmp(&b.span.start.line))
+    });
+
+    let table = exports
+        .iter()
+        .map(|export| {
+            vec![
+                export.binding.as_str().cell(),
+                match export.export_kind {
+                    ImportOrExportKind::Value => "value".cell(),
+                    ImportOrExportKind::Type => "type".cell(),
+                },
+                export.span.start.line.to_string().cell(),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .table()
+        .title(vec!["Export".cell(), "Export kind".cell(), "Line".cell()]);
+
+    print_stdout(table)?;
+    Ok(())
 }
 
 fn run_parse_args(args: ParseArgs) -> Result<(), Error> {
@@ -262,8 +334,8 @@ fn run_workspace_module_args(args: WorkspaceModuleArgs) -> Result<(), Error> {
             page,
             per_page,
         } => {
-            let directory = std::env::current_dir()?;
-            let project = query::Project::new(vec![directory])?;
+            let directory = std::env::current_dir()?.canonicalize()?;
+            let project = query::Project::new(vec![&directory])?;
             let workspace_directory = path.canonicalize()?;
             let workspace_id = project
                 .graph
@@ -292,10 +364,7 @@ fn run_workspace_module_args(args: WorkspaceModuleArgs) -> Result<(), Error> {
                 .iter()
                 .map(|module_id| {
                     let module = project.graph.module(module_id);
-                    let relative = module
-                        .path
-                        .strip_prefix(&workspace_directory)
-                        .unwrap_or(&module.path);
+                    let relative = module.path.strip_prefix(&directory).unwrap_or(&module.path);
                     vec![relative.display().to_string().cell()]
                 })
                 .collect::<Vec<_>>()

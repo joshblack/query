@@ -4,9 +4,16 @@ use std::{
 };
 
 use ignore::{WalkBuilder, types::TypesBuilder};
+use oxc_allocator::Allocator;
 use petgraph::{
     csr::DefaultIx,
     graph::{DiGraph, NodeIndex},
+};
+use rayon::prelude::*;
+
+use crate::{
+    Export, ImportOrExportKind,
+    parse::{ParseResult, Span, parse},
 };
 
 pub struct Project {
@@ -115,17 +122,67 @@ impl Project {
             }
         }
 
-        for module_path in modules {
-            let workspace_id = module_path
-                .ancestors()
-                .skip(1)
-                .find_map(|dir| workspaces.get(dir));
-            let module = Module { path: module_path };
+        let module_ids = modules
+            .into_iter()
+            .map(|path| {
+                let workspace_id = path.ancestors().skip(1).find_map(|dir| workspaces.get(dir));
+                let module = Module { path };
 
-            if let Some(workspace_id) = workspace_id {
-                graph.insert_workspace_module(workspace_id, module);
-            } else {
-                graph.insert_module(module);
+                if let Some(workspace_id) = workspace_id {
+                    graph.insert_workspace_module(workspace_id, module)
+                } else {
+                    graph.insert_module(module)
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let parse_results = module_ids
+            .into_par_iter()
+            .map_init(Allocator::new, |allocator, module_id| {
+                with_arena(allocator, |allocator| {
+                    let module = graph.module(&module_id);
+                    let source = std::fs::read_to_string(&module.path)?;
+                    let source_type = oxc_span::SourceType::from_path(&module.path)?;
+                    let ret = parse(&allocator, &source, source_type)?;
+
+                    Ok((module_id, ret))
+                })
+            })
+            .collect::<Vec<Result<(ModuleId, ParseResult), Error>>>();
+
+        for parse_result in parse_results {
+            let Ok((module_id, ret)) = parse_result else {
+                continue;
+            };
+
+            // Capture errors
+            // Capture unsupported
+            // Queue up imports and pending exports for later (what order to pick?)
+            // Add stable exports
+
+            for export in ret.exports.into_values() {
+                match export {
+                    Export::Default(default_export) => {
+                        graph.insert_module_export(
+                            &module_id,
+                            ModuleExport {
+                                binding: "default".to_string(),
+                                export_kind: ImportOrExportKind::Value,
+                                span: default_export.span,
+                            },
+                        );
+                    }
+                    Export::Named(named_export) => {
+                        graph.insert_module_export(
+                            &module_id,
+                            ModuleExport {
+                                binding: named_export.binding.clone(),
+                                export_kind: named_export.export_kind,
+                                span: named_export.span,
+                            },
+                        );
+                    }
+                }
             }
         }
 
@@ -146,6 +203,18 @@ pub enum Error {
 
     #[error("Failed to build glob: {0}")]
     GlobBuildError(#[from] globset::Error),
+
+    #[error("Failed to parse module: {0}")]
+    ParseError(#[from] crate::parse::ParseError),
+
+    #[error("Failed to parse source type: {0}")]
+    SourceTypeError(#[from] oxc_span::UnknownExtension),
+}
+
+fn with_arena<T>(arena: &mut Allocator, run: impl FnOnce(&Allocator) -> T) -> T {
+    let result = run(arena);
+    arena.reset();
+    result
 }
 
 pub struct Graph {
@@ -205,6 +274,40 @@ impl Graph {
                 };
                 Some(WorkspaceId(workspace_index))
             })
+    }
+
+    // Module -[ModuleExport]-> ModuleExport -----------------------------------
+
+    pub fn module_exports(&self, module_id: &ModuleId) -> impl Iterator<Item = ModuleExportId> {
+        self.graph
+            .neighbors_directed(module_id.0, petgraph::Direction::Outgoing)
+            .filter_map(|module_export_index| {
+                let Node::ModuleExport(_) = &self.graph[module_export_index] else {
+                    return None;
+                };
+                Some(ModuleExportId(module_export_index))
+            })
+    }
+
+    pub fn module_export(&self, module_export_id: &ModuleExportId) -> &ModuleExport {
+        let Node::ModuleExport(module_export) = &self.graph[module_export_id.0] else {
+            unreachable!("A ModuleExport node must exist for any given ModuleExportId")
+        };
+        module_export
+    }
+
+    fn insert_module_export(
+        &mut self,
+        module_id: &ModuleId,
+        module_export: ModuleExport,
+    ) -> ModuleExportId {
+        let node = Node::ModuleExport(module_export);
+        let module_export_id = ModuleExportId(self.graph.add_node(node));
+
+        self.graph
+            .add_edge(module_id.0, module_export_id.0, Edge::ModuleExport);
+
+        module_export_id
     }
 
     // Source ------------------------------------------------------------------
@@ -342,6 +445,7 @@ impl Graph {
 
 enum Node {
     Module(Module),
+    ModuleExport(ModuleExport),
     Source(Source),
     Workspace(Workspace),
 }
@@ -349,6 +453,8 @@ enum Node {
 enum Edge {
     /// A directed edge from a Workspace to one of its child Workspaces
     ChildWorkspace,
+    /// A directed edge from a Module to one of its Exports
+    ModuleExport,
     /// A directed edge from a Workspace to one of its Modules
     Module,
     /// A directed edge from a Workspace to the Source that contains it
@@ -386,6 +492,15 @@ pub struct ModuleId(NodeIndex);
 
 pub struct Module {
     pub path: PathBuf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ModuleExportId(NodeIndex);
+
+pub struct ModuleExport {
+    pub binding: String,
+    pub export_kind: ImportOrExportKind,
+    pub span: Span,
 }
 
 #[cfg(test)]
@@ -526,6 +641,66 @@ mod tests {
                 .iter()
                 .all(|module_id| workspace_module_ids.contains(module_id))
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_module_exports_empty() -> Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let directory = tempdir.path().to_path_buf();
+        let module_a_path = directory.join("a.js");
+
+        std::fs::write(directory.join("package.json"), "{}")?;
+        std::fs::write(&module_a_path, "")?;
+
+        let project = Project::new(vec![&directory])?;
+        let module_a_id = project
+            .graph
+            .find_module_by_path(&module_a_path)
+            .expect("Module A should exist");
+        let module_export_ids = project
+            .graph
+            .module_exports(&module_a_id)
+            .collect::<Vec<_>>();
+
+        assert!(module_export_ids.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_module_exports() -> Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let directory = tempdir.path().to_path_buf();
+        let module_a_path = directory.join("a.js");
+
+        std::fs::write(directory.join("package.json"), "{}")?;
+        std::fs::write(
+            &module_a_path,
+            "export const foo = 42; export default 'bar';",
+        )?;
+
+        let project = Project::new(vec![&directory])?;
+        let module_a_id = project
+            .graph
+            .find_module_by_path(&module_a_path)
+            .expect("Module A should exist");
+        let module_export_ids = project
+            .graph
+            .module_exports(&module_a_id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(module_export_ids.len(), 2);
+        assert!(module_export_ids.iter().any(|module_export_id| {
+            let module_export = project.graph.module_export(module_export_id);
+            module_export.binding == "foo" && module_export.export_kind == ImportOrExportKind::Value
+        }));
+        assert!(module_export_ids.iter().any(|module_export_id| {
+            let module_export = project.graph.module_export(module_export_id);
+            module_export.binding == "default"
+                && module_export.export_kind == ImportOrExportKind::Value
+        }));
 
         Ok(())
     }
